@@ -87,12 +87,18 @@ class Sfx {
     s.stop(t + dur + 0.02);
   }
 
-  shoot(kind: 'pistol' | 'smg', ads: boolean) {
+  shoot(kind: 'pistol' | 'smg' | 'revolver', ads: boolean) {
     const v = ads ? 0.85 : 1;
     if (kind === 'pistol') {
       this.noise(0.16, 0.85 * v, 'lowpass', 2200, 160, 0.7);
       this.tone('sine', 150, 44, 0.13, 0.7 * v);
       this.tone('square', 800, 220, 0.03, 0.16 * v);
+    } else if (kind === 'revolver') {
+      // snub .38: short-barrel boom — all low thump, sharp crack, then the cylinder click
+      this.noise(0.13, 0.9 * v, 'lowpass', 1500, 110, 0.7);
+      this.tone('sine', 132, 36, 0.12, 0.8 * v);
+      this.noise(0.045, 0.3 * v, 'highpass', 2400, 3600, 0.7);
+      this.tone('square', 1900, 700, 0.018, 0.14 * v, 0.07); // hand ratchets the cylinder
     } else {
       this.noise(0.085, 0.55 * v, 'lowpass', 3400, 420, 0.7);
       this.tone('square', 240, 90, 0.05, 0.22 * v);
@@ -101,11 +107,12 @@ class Sfx {
   }
 
   /** canned subsonic thump + gas hiss of a suppressor */
-  supShot(kind: 'pistol' | 'smg') {
-    const lp = kind === 'pistol' ? 620 : 900;
-    this.noise(0.11, kind === 'pistol' ? 0.42 : 0.3, 'lowpass', lp, lp * 0.3, 0.85);
+  supShot(kind: 'pistol' | 'smg' | 'revolver') {
+    const lp = kind === 'pistol' ? 620 : kind === 'revolver' ? 520 : 900;
+    this.noise(0.11, kind === 'smg' ? 0.3 : 0.42, 'lowpass', lp, lp * 0.3, 0.85);
     this.tone('sine', 120, 52, 0.09, 0.34);
     this.noise(0.16, 0.1, 'highpass', 3800, 5200, 0.9, 0.04); // escaping gas
+    if (kind === 'revolver') this.tone('square', 1900, 700, 0.018, 0.1, 0.06); // cylinder still clicks
   }
 
   ui() {

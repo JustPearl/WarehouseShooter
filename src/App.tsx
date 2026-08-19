@@ -10,6 +10,7 @@ const DEFAULT_HUD: HudState = {
   weapons: [
     { name: 'KODIAK .45', short: 'KDK .45', mag: 8, reserve: 56, auto: false, mode: 'SEMI', atts: [] },
     { name: 'PTARMIGAN M9', short: 'PTM 9MM', mag: 30, reserve: 150, auto: true, mode: 'AUTO', atts: [] },
+    { name: 'SABLE .38', short: 'SBL .38', mag: 5, reserve: 40, auto: false, mode: 'SEMI', atts: [] },
   ],
   wave: 0,
   enemiesLeft: 0,
@@ -64,25 +65,28 @@ function loadSens(): number {
     return Number.isFinite(v) && v > 0 ? v : 1;
   } catch { return 1; }
 }
-function loadLoadout(): { p: string[]; s: string[] } {
+function loadLoadout(): { p: string[]; s: string[]; r: string[] } {
   try {
     const raw = JSON.parse(localStorage.getItem('wp_loadout') || '');
-    if (raw && Array.isArray(raw.p) && Array.isArray(raw.s)) return { p: raw.p, s: raw.s };
+    if (raw && Array.isArray(raw.p) && Array.isArray(raw.s)) {
+      return { p: raw.p, s: raw.s, r: Array.isArray(raw.r) ? raw.r : [] };
+    }
   } catch { /* ignore */ }
-  return { p: [], s: [] };
+  return { p: [], s: [], r: [] };
 }
 
 /* ---------- attachment catalog (ids match the engine's ATT_MODS) ---------- */
-interface AttDef { id: string; name: string; slot: string; weapon: 'p' | 's' | 'both'; good: string; bad: string }
+interface AttDef { id: string; name: string; slot: string; weapon: 'p' | 's' | 'r' | 'both'; good: string; bad: string }
 const ATTACHMENTS: AttDef[] = [
   { id: 'supp',   name: 'MONOBLOC SUPPRESSOR',   slot: 'MUZZLE',     weapon: 'both', good: 'RECOIL −12% · FLASH TAMED · SUBSONIC REPORT', bad: 'DAMAGE −8% · SLOWER SIGHT RAISE' },
   { id: 'comp',   name: 'AGGRESSOR COMPENSATOR', slot: 'MUZZLE',     weapon: 'both', good: 'VERTICAL RECOIL −25%',                        bad: 'SPREAD +30% · LOUDER FLASH CONE' },
-  { id: 'xmag',   name: 'EXTENDED MAGAZINE',     slot: 'MAGAZINE',   weapon: 'both', good: '+4 RDS (.45) / +10 RDS (9MM)',                bad: 'RELOAD +25% · SLOWER HANDLING' },
+  { id: 'xmag',   name: 'EXTENDED MAG / CYL.',   slot: 'MAGAZINE',   weapon: 'both', good: '+4 (.45) / +10 (9MM) / +2 (.38) ROUNDS',      bad: 'RELOAD +25% · SLOWER HANDLING' },
   { id: 'laser',  name: 'TACTICAL LASER',        slot: 'UNDERBARREL', weapon: 'both', good: 'HIP-FIRE BLOOM −45% · MOVE PENALTY −50%',     bad: 'RECOIL +5–8% · BEAM GIVES YOU AWAY' },
   { id: 'vgrip',  name: 'ANGLED GRIP',           slot: 'UNDERBARREL', weapon: 's',    good: 'VERTICAL RECOIL −22%',                        bad: 'MOVE PENALTY +22% · SLOWER ADS' },
   { id: 'rdot',   name: 'MINI REFLEX SIGHT',     slot: 'OPTIC',      weapon: 's',    good: 'SNAPPIER SIGHT PICTURE · −30% ADS LAG',       bad: 'HIP SPREAD +12% · TOP-HEAVY' },
   { id: 'match',  name: 'MATCH TRIGGER',         slot: 'INTERNAL',   weapon: 'p',    good: 'FIRE RATE +12% · FASTER RECOVERY',            bad: 'SHOT CONSISTENCY −35%' },
   { id: 'lslide', name: 'LONGSLIDE KIT',         slot: 'INTERNAL',   weapon: 'p',    good: '−15% ADS LAG · RECOIL −8%',                   bad: 'SLOWER SIGHT RAISE · HEAVY FRONT' },
+  { id: 'grips',  name: 'TARGET GRIPS',          slot: 'GRIP',       weapon: 'r',    good: 'RECOIL −18% · TIGHTER PULL SPREAD',           bad: 'SLIGHTLY SLOWER SIGHT RAISE' },
 ];
 
 function SettingToggle({ label, desc, value, onToggle }: { label: string; desc: string; value: boolean; onToggle: () => void }) {
@@ -114,10 +118,10 @@ function SettingToggle({ label, desc, value, onToggle }: { label: string; desc: 
 function LoadoutPanel({
   loadout, onToggle,
 }: {
-  loadout: { p: string[]; s: string[] };
-  onToggle: (w: 'p' | 's', id: string) => void;
+  loadout: { p: string[]; s: string[]; r: string[] };
+  onToggle: (w: 'p' | 's' | 'r', id: string) => void;
 }) {
-  const col = (wk: 'p' | 's', title: string, sub: string) => (
+  const col = (wk: 'p' | 's' | 'r', title: string, sub: string) => (
     <div className="hud-plate min-w-0 flex-1 px-5 py-4">
       <div className="flex items-baseline justify-between">
         <span className="font-display text-lg text-[#ffab3d]">{title}</span>
@@ -158,9 +162,10 @@ function LoadoutPanel({
   );
 
   return (
-    <div className="flex w-full max-w-4xl flex-col gap-4 lg:flex-row">
+    <div className="flex w-full max-w-6xl flex-col gap-4 lg:flex-row">
       {col('p', 'KODIAK .45', 'SIDEARM')}
       {col('s', 'PTARMIGAN M9', 'PRIMARY')}
+      {col('r', 'SABLE .38', 'SNUB REVOLVER')}
     </div>
   );
 }
@@ -293,10 +298,10 @@ export default function App() {
   const [manualSec, setManualSec] = useState('brief');
   const [crosshairOn, setCrosshairOn] = useState<boolean>(loadXhair);
   const [sens, setSens] = useState<number>(loadSens);
-  const [loadout, setLoadout] = useState<{ p: string[]; s: string[] }>(loadLoadout);
+  const [loadout, setLoadout] = useState<{ p: string[]; s: string[]; r: string[] }>(loadLoadout);
   const [showLoadout, setShowLoadout] = useState(false);
 
-  const toggleAtt = useCallback((wk: 'p' | 's', id: string) => {
+  const toggleAtt = useCallback((wk: 'p' | 's' | 'r', id: string) => {
     setLoadout((prev) => {
       const list = prev[wk];
       let next: string[];
@@ -308,7 +313,7 @@ export default function App() {
       }
       const merged = { ...prev, [wk]: next };
       try { localStorage.setItem('wp_loadout', JSON.stringify(merged)); } catch { /* ignore */ }
-      engineRef.current?.applyLoadout([...merged.p.map((x) => `p:${x}`), ...merged.s.map((x) => `s:${x}`)]);
+      engineRef.current?.applyLoadout([...merged.p.map((x) => `p:${x}`), ...merged.s.map((x) => `s:${x}`), ...merged.r.map((x) => `r:${x}`)]);
       sfx.ui();
       return merged;
     });
@@ -367,7 +372,7 @@ export default function App() {
     engine.boot();
     engine.setSensitivity(loadSens());
     const lo = loadLoadout();
-    engine.applyLoadout([...lo.p.map((x) => `p:${x}`), ...lo.s.map((x) => `s:${x}`)]);
+    engine.applyLoadout([...lo.p.map((x) => `p:${x}`), ...lo.s.map((x) => `s:${x}`), ...lo.r.map((x) => `r:${x}`)]);
     return () => {
       engine.dispose();
       engineRef.current = null;

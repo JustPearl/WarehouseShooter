@@ -92,7 +92,7 @@ export interface RecoilModel {
   caliberImpulse: number; // cartridge impulse multiplier (.45 heavy push = 1.0, 9mm snappy = 0.58)
   weightKg: number; // loaded weight — heavier guns rattle the shooter less
   stock: boolean; // shoulder stock: tighter brace, faster settled picture
-  action: 'slide' | 'blowback'; // slide returns to battery with a snap; blowback bolt taps forward
+  action: 'slide' | 'blowback' | 'revolver'; // revolver: fixed barrel, the cylinder indexes between shots
   patternPitch: number[]; // vertical rise per shot index (fractions of the impulse)
   patternYaw: number[]; // horizontal step per shot index (signed fractions — the learnable weave)
   noise: number; // ± random fraction added to each step (keep small: realism = consistency)
@@ -146,8 +146,9 @@ export const ATT_MODS: Record<string, Partial<WeaponMods>> = {
   rdot:  { adsErr: 0.7, adsBloom: 0.8, adsSpeed: 1.18, spread: 1.12 },
   match: { fire: 0.88, recov: 1.3, noise: 1.35 },
   lslide:{ adsErr: 0.85, vert: 0.92, adsSpeed: 0.88, move: 1.1 },
+  grips: { vert: 0.82, noise: 0.8, adsSpeed: 0.9 },
 };
-export const ATT_MAGADD: Record<string, [number, number]> = { xmag: [4, 10] }; // [pistol, smg]
+export const ATT_MAGADD: Record<string, [number, number, number]> = { xmag: [4, 10, 2] }; // [pistol, smg, revolver]
 
 /* ============================== weapons ============================== */
 
@@ -207,6 +208,24 @@ export const WEAPON_CFGS: WeaponCfg[] = [
       noise: 0.08, varRange: 0.10,
       recovDelay: 0.09, recovPitch: 5.0, recovYaw: 7.5,
       adsBrace: 0.42, rollAmp: 0.15,
+    },
+  },
+  {
+    id: 'revolver', name: 'SABLE .38', short: 'SBL .38', auto: false,
+    dmg: 44, headMul: 2.2, magSize: 5, startReserve: 40,
+    fireDelay: 0.30, reloadTime: 2.3, kick: 0.052, spread: 0.004, bloom: 0.002, moveSpread: 0.02,
+    // featherweight snub, held close; fixed sight line at local y=+0.052
+    hip: new THREE.Vector3(0.21, -0.19, -0.38), ads: new THREE.Vector3(0, -0.052, -0.30), adsFov: 62,
+    // five chambers, one turn of the cylinder: a rising staircase of heavy shoves that twists
+    // with the cylinder's indexing. Fixed barrel + no slide to cycle means every pull is its
+    // own event — the gun settles fast between shots, but the double-action pull is long
+    recoil: {
+      caliberImpulse: 0.92, weightKg: 0.75, stock: false, action: 'revolver',
+      patternPitch: [0.62, 0.70, 0.66, 0.74, 0.80],
+      patternYaw: [0.12, -0.10, 0.14, -0.12, 0.09],
+      noise: 0.12, varRange: 0.16,
+      recovDelay: 0.05, recovPitch: 9.5, recovYaw: 11,
+      adsBrace: 0.5, rollAmp: 0.42,
     },
   },
 ];

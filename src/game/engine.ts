@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { sfx } from './audio';
 import { dotTexture } from './textures';
-import { buildPistol, buildSMG, buildMercenary, MERC_SKINS } from './models';
+import { buildPistol, buildSMG, buildRevolver, buildMercenary, MERC_SKINS } from './models';
 import { buildAttNodes } from './attachments';
 import { FxPool } from './fx';
 import { buildLights, buildWorld, PathGrid } from './world';
@@ -230,7 +230,7 @@ export class Engine {
   private buildWeapons() {
     this.gunRig = new THREE.Group();
     this.camera.add(this.gunRig);
-    const builders = [buildPistol, buildSMG];
+    const builders = [buildPistol, buildSMG, buildRevolver];
     WEAPON_CFGS.forEach((cfg, i) => {
       const model = builders[i]();
       model.group.position.copy(cfg.hip);
@@ -263,6 +263,7 @@ export class Engine {
     if (e.code === 'KeyR') this.startReload();
     if (e.code === 'Digit1') this.switchTo(0);
     if (e.code === 'Digit2') this.switchTo(1);
+    if (e.code === 'Digit3') this.switchTo(2);
     if (e.code === 'KeyV') this.toggleFireMode();
     if (e.code === 'KeyF') this.melee();
   };
@@ -289,7 +290,8 @@ export class Engine {
     const now = performance.now();
     if (now - this.wheelT < 220) return;
     this.wheelT = now;
-    this.switchTo(this.weaponIndex === 0 ? 1 : 0);
+    const dir = e.deltaY > 0 ? 1 : -1;
+    this.switchTo((this.weaponIndex + dir + this.weapons.length) % this.weapons.length);
   };
   private onLockChange = () => {
     const locked = document.pointerLockElement === this.canvas;
@@ -397,10 +399,11 @@ export class Engine {
     this.canvas.requestPointerLock();
   }
 
-  /** Equip attachments live. ids are prefixed 'p:' (pistol) / 's:' (SMG). */
+  /** Equip attachments live. ids are prefixed 'p:' / 's:' / 'r:' per weapon slot. */
   applyLoadout(ids: string[]) {
+    const prefixes = ['p', 's', 'r'];
     this.weapons.forEach((w, wi) => {
-      const pfx = wi === 0 ? 'p' : 's';
+      const pfx = prefixes[wi] ?? 'x';
       const mod: WeaponMods = { ...NEUTRAL };
       for (const raw of ids) {
         const [p, id] = raw.split(':');
@@ -737,10 +740,18 @@ export class Engine {
     this.fovKick = Math.min(1.8, this.fovKick + imp * (m.stock ? 23.5 : 20.7) * brace);
     w.kickV = 0.9 + Math.random() * 0.2; // muzzle flip — mostly consistent, a hint of life
     w.kickVar = 0.92 + Math.random() * 0.16;
-    // action-cycle echo: deterministic timing, purely visual — the slide snaps / bolt slaps,
-    // but it never nudges a bullet already in flight logic
-    w.echoT = m.action === 'slide' ? 0.075 : 0.045;
-    w.echoMag = m.action === 'slide' ? -(imp * 0.28 * brace) : imp * 0.16 * brace;
+    // action-cycle echo: deterministic timing, purely visual — the slide snaps, the bolt slaps,
+    // the cylinder ratchets — but none of it nudges a bullet already in flight
+    if (m.action === 'slide') {
+      w.echoT = 0.075;
+      w.echoMag = -(imp * 0.28 * brace);
+    } else if (m.action === 'revolver') {
+      w.echoT = 0.06;
+      w.echoMag = imp * 0.10 * brace; // the next chamber indexes into line
+    } else {
+      w.echoT = 0.045;
+      w.echoMag = imp * 0.16 * brace;
+    }
 
     // --- random dispersion (the part the crosshair honestly reports): spread + heat + movement ---
     const speedXZ = Math.hypot(this.vel.x, this.vel.z);
@@ -754,8 +765,8 @@ export class Engine {
     w.aimJitX = (Math.random() - 0.5) * 2 * bloom * (0.5 + Math.random() * 0.8);
     w.aimJitY = (Math.random() - 0.5) * 2 * bloom * (0.5 + Math.random() * 0.8);
 
-    if (w.mod.suppressed) sfx.supShot(w.cfg.id as 'pistol' | 'smg');
-    else sfx.shoot(w.cfg.id as 'pistol' | 'smg', this.ads);
+    if (w.mod.suppressed) sfx.supShot(w.cfg.id as 'pistol' | 'smg' | 'revolver');
+    else sfx.shoot(w.cfg.id as 'pistol' | 'smg' | 'revolver', this.ads);
     const flMat = w.model.flash.material as THREE.SpriteMaterial;
     const flBase = w.flashBase * w.mod.flash;
     w.model.flash.scale.set(flBase, flBase, 1);
@@ -765,8 +776,11 @@ export class Engine {
     this.gunLight.intensity = 26 * w.mod.flash;
 
     // casing (ejects to the shooter's right — no per-shot allocations)
-    this.tmpV3.set(0.15, -0.15, -0.2).applyAxisAngle(UP_Y, this.yaw).add(this.pos);
-    this.fx.burst(this.tmpV3, 'case', 1, 1, 10, 0.7, this.yaw);
+    // the revolver keeps its brass in the cylinder until the speedloader reload
+    if (w.cfg.id !== 'revolver') {
+      this.tmpV3.set(0.15, -0.15, -0.2).applyAxisAngle(UP_Y, this.yaw).add(this.pos);
+      this.fx.burst(this.tmpV3, 'case', 1, 1, 10, 0.7, this.yaw);
+    }
 
     // --- hitscan: straight line out of the muzzle, exactly where the barrel points ---
     const muzzleP = w.model.muzzle.getWorldPosition(this.tmpV).clone();

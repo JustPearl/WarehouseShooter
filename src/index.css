@@ -172,6 +172,20 @@ html, body, #root {
 .stat-bar > i { display: block; height: 100%; background: linear-gradient(90deg, #7fb7c9, #bfeaf5); }
 .stat-bar.amber > i { background: linear-gradient(90deg, #ff8f2e, #ffc46e); }
 
+@keyframes kfPop {
+  0% { opacity: 0; transform: translate(-50%, 6px) scale(0.7); }
+  14% { opacity: 1; transform: translate(-50%, -6px) scale(1.12); }
+  30% { transform: translate(-50%, -14px) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -52px) scale(0.92); }
+}
+@keyframes kfStreak {
+  0% { opacity: 0; transform: translateX(-50%) scale(1.6); filter: brightness(2.2); }
+  100% { opacity: 1; transform: translateX(-50%) scale(1); filter: brightness(1); }
+}
+
+.fx-pop { animation: kfPop 0.95s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.fx-streak { animation: kfStreak 0.28s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
 ::selection { background: rgba(255, 171, 61, 0.4); }
 
 /* ---------- cold grade + film grain (grit overlay, always on) ---------- */

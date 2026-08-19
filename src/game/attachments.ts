@@ -59,7 +59,7 @@ export function buildAttNodes(model: WeaponModel, wi: number): Record<string, TH
     put('laser', attBox(0.02, 0.026, 0.055, attDark, 0, -0.055, -0.115), attBox(0.008, 0.008, 0.008, attAmber, 0, -0.055, -0.145), laserBeam(-0.055));
     put('match', attBox(0.009, 0.036, 0.01, attAmber, 0, -0.076, -0.041));
     put('lslide', attBox(0.056, 0.058, 0.078, attSteel, 0, 0.001, -0.205), attCyl(0.012, 0.05, attDark, 0, 0.004, -0.25));
-  } else {
+  } else if (wi === 1) {
     // PTARMIGAN M9 (bore y=+0.002, handguard z -0.107..-0.282, muzzle z=-0.42)
     const suppG = new THREE.Group();
     suppG.add(attCyl(0.021, 0.13, attDark, 0, 0.002, -0.42));
@@ -80,6 +80,22 @@ export function buildAttNodes(model: WeaponModel, wi: number): Record<string, TH
     rdot.position.set(0, 0.07, -0.038);
     rdotG.add(rdot);
     put('rdot', rdotG);
+  } else {
+    // SABLE .38 (bore y=+0.012, snub muzzle z=-0.172, cylinder z=-0.022, grip at z=+0.05)
+    const suppG = new THREE.Group();
+    suppG.add(attCyl(0.0165, 0.075, attDark, 0, 0.012, -0.20));
+    suppG.add(attCyl(0.0175, 0.010, attSteel, 0, 0.012, -0.168));
+    put('supp', suppG);
+    // 7-shot cylinder conversion: a taller cylinder with an amber charge band
+    const xmagG = new THREE.Group();
+    xmagG.add(attCyl(0.0365, 0.064, attSteel, 0, 0.010, -0.022));
+    const band = attBox(0.075, 0.010, 0.064, attAmber, 0, 0.010, -0.022);
+    band.scale.x = 1; // wraps visually as a slab through the cylinder
+    xmagG.add(band);
+    put('xmag', xmagG);
+    put('laser', attBox(0.018, 0.022, 0.048, attDark, 0, -0.036, -0.104), attBox(0.007, 0.007, 0.007, attAmber, 0, -0.036, -0.13), laserBeam(-0.036));
+    // target grips: smoother dark walnut with a palm swell
+    put('grips', attBox(0.044, 0.102, 0.052, attPoly, 0, -0.098, 0.067, -0.34), attBox(0.046, 0.013, 0.054, attSteel, 0, -0.052, 0.052, -0.34));
   }
   return out;
 }
