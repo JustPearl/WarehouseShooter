@@ -9,8 +9,8 @@ const DEFAULT_HUD: HudState = {
   health: 100,
   weaponIndex: 0,
   weapons: [
-    { name: 'KODIAK .45', short: 'KDK .45', mag: 8, reserve: 56, auto: false },
-    { name: 'PTARMIGAN M9', short: 'PTM 9MM', mag: 30, reserve: 150, auto: true },
+    { name: 'KODIAK .45', short: 'KDK .45', mag: 8, reserve: 56, auto: false, mode: 'SEMI' },
+    { name: 'PTARMIGAN M9', short: 'PTM 9MM', mag: 30, reserve: 150, auto: true, mode: 'AUTO' },
   ],
   wave: 0,
   enemiesLeft: 0,
@@ -281,8 +281,8 @@ export default function App() {
             <div className="flex items-center justify-end gap-2">
               <span className="text-[#ffab3d]"><IconBullet /></span>
               <span className="font-display text-lg leading-none text-[#bfeaf5]">{w.name}</span>
-              <span className="ml-1 border border-[rgba(127,183,201,0.35)] px-1.5 py-0.5 text-[9px] font-bold tracking-[0.25em] text-[#7fb7c9]">
-                {w.auto ? 'FULL-AUTO' : 'SEMI-AUTO'}
+              <span className={`ml-1 border px-1.5 py-0.5 text-[9px] font-bold tracking-[0.25em] ${w.mode === 'BURST' ? 'border-[#ffab3d] text-[#ffab3d]' : 'border-[rgba(127,183,201,0.35)] text-[#7fb7c9]'}`}>
+                {w.auto ? `${w.mode} · V` : w.mode}
               </span>
             </div>
             <div className="mt-0.5 flex items-end justify-end gap-2">
@@ -306,7 +306,7 @@ export default function App() {
           {/* control hints during wave 1 */}
           {hud.wave <= 1 && hud.phase === 'playing' && (
             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-[11px] font-semibold tracking-[0.24em] text-[rgba(191,234,245,0.5)]">
-              R RELOAD&ensp;•&ensp;1/2 WEAPONS&ensp;•&ensp;RMB AIM&ensp;•&ensp;SHIFT SPRINT&ensp;•&ensp;SPACE JUMP&ensp;•&ensp;5S CLEAR = VITALS RESTORE
+              R RELOAD&ensp;•&ensp;V FIRE MODE&ensp;•&ensp;F MELEE&ensp;•&ensp;1/2 WEAPONS&ensp;•&ensp;RMB AIM&ensp;•&ensp;SHIFT SPRINT&ensp;•&ensp;5S CLEAR = VITALS RESTORE
             </div>
           )}
         </div>
@@ -343,6 +343,7 @@ export default function App() {
                   ['W A S D', 'MOVE'], ['MOUSE', 'AIM — CURSOR LOCKS'],
                   ['LMB', 'FIRE'], ['RMB', 'AIM DOWN SIGHTS'],
                   ['R', 'RELOAD'], ['1 / 2 / WHEEL', 'SWAP WEAPON'],
+                  ['V', 'FIRE MODE — AUTO/BURST'], ['F', 'MELEE STOCK-STRIKE'],
                   ['SHIFT', 'SPRINT'], ['SPACE', 'JUMP'], ['ESC', 'PAUSE'],
                   ['5S CLEAR', 'VITALS RESTORE'],
                 ].map(([k, v]) => (
@@ -351,6 +352,25 @@ export default function App() {
                     <span>{v}</span>
                   </div>
                 ))}
+              </div>
+
+              {/* threat intel */}
+              <div className="hud-plate mt-4 max-w-md px-5 py-4">
+                <div className="text-[10px] font-bold tracking-[0.3em] text-[#7fb7c9]">THREAT INTEL — READ THE SHOULDER LAMP</div>
+                <div className="mt-2.5 space-y-2 text-[12px] font-medium leading-snug text-[#9cc3d2]">
+                  <div className="flex items-center gap-2.5">
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#3a4750]" />
+                    <span><span className="font-bold text-[#bfeaf5]">RIFLEMAN</span> — standard. Holds mid-range, fires bursts.</span>
+                  </div>
+                  <div className="flex items-center gap-2.5">
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#ff8b2a] shadow-[0_0_8px_#ff8b2a]" />
+                    <span><span className="font-bold text-[#ffab3d]">BREACHER</span> — shotgun. Sprints in close, hits hard. Keep distance or burst it down.</span>
+                  </div>
+                  <div className="flex items-center gap-2.5">
+                    <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#55d7ff] shadow-[0_0_8px_#55d7ff]" />
+                    <span><span className="font-bold text-[#bfeaf5]">MARKSMAN</span> — precise long-range crack. Punishes you in the open. Close the gap.</span>
+                  </div>
+                </div>
               </div>
 
               <div className="relative mt-7 flex items-center gap-5">
@@ -505,9 +525,9 @@ const ARMORY = [
   },
   {
     name: 'PTARMIGAN M9',
-    mode: 'FULL-AUTO PDW',
-    spec: ['9×19MM', '2.45 KG', 'FOLDING STOCK', 'BLOWBACK'],
-    desc: 'Compact 9mm storm. The stock drinks the roll — recoil climbs in a weave, short bursts keep it level.',
+    mode: 'FULL-AUTO / 3-RD BURST',
+    spec: ['9×19MM', '2.45 KG', 'FOLDING STOCK', 'SELECT-FIRE'],
+    desc: 'Compact 9mm storm. The stock drinks the roll — recoil climbs in a weave. Tap V for a tight 3-round burst at range.',
     recoil: 'BRACED CLIMB — NEAR-FLAT IN ADS',
     stats: [
       ['DMG', 40, true],

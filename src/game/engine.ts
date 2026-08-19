@@ -15,6 +15,7 @@ export interface WeaponHud {
   mag: number;
   reserve: number;
   auto: boolean;
+  mode: string; // 'SEMI' | 'AUTO' | 'BURST'
 }
 
 export interface HudState {
@@ -153,6 +154,10 @@ interface WeaponRt {
   burstAcc: number; // shots in the current burst (drives climb pattern + S-curve phase)
   driftPhase: number; // random S-curve phase per burst
   lastFireT: number; // sim time of last shot (burst-gap detection)
+  mode: number; // 0 = full-auto, 1 = 3-round burst (auto weapons only)
+  burstLeft: number; // rounds remaining in the current burst
+  meleeK: number; // melee lunge animation 0..1
+  meleeT: number; // melee cooldown timer
 }
 
 interface Enemy {
@@ -178,6 +183,7 @@ interface Enemy {
   hurtT: number;
   hurtX: number;
   hurtZ: number;
+  role: 'rifle' | 'breacher' | 'marksman';
   rag: Ragdoll | null;
 }
 
@@ -861,6 +867,7 @@ export class Engine {
         cooldown: 0, heat: 0, reloadT: -1, kickV: 0, kickVis: 0, kickVar: 1,
         aimJitX: 0, aimJitY: 0, patternSign: 1, echoT: -1, echoMag: 0,
         burstAcc: 0, driftPhase: 0, lastFireT: -1,
+        mode: 0, burstLeft: 0, meleeK: 0, meleeT: 0,
       });
     });
     this.gunLight = new THREE.PointLight(0xffc47a, 0, 9, 2);
@@ -905,6 +912,8 @@ export class Engine {
     if (e.code === 'KeyR') this.startReload();
     if (e.code === 'Digit1') this.switchTo(0);
     if (e.code === 'Digit2') this.switchTo(1);
+    if (e.code === 'KeyV') this.toggleFireMode();
+    if (e.code === 'KeyF') this.melee();
   };
   private onKeyUp = (e: KeyboardEvent) => { this.keys[e.code] = false; };
   private onMouseDown = (e: MouseEvent) => {
@@ -1015,6 +1024,10 @@ export class Engine {
       w.kickVar = 1;
       w.burstAcc = 0;
       w.lastFireT = -1;
+      w.mode = 0;
+      w.burstLeft = 0;
+      w.meleeK = 0;
+      w.meleeT = 0;
       w.model.group.visible = i === 0;
     });
     this.gunRig.visible = true;
@@ -1086,6 +1099,21 @@ export class Engine {
     model.group.position.set(best[0] + (Math.random() - 0.5) * 3, -1.5, best[1] + (Math.random() - 0.5) * 3);
     this.scene.add(model.group);
 
+    // ---- combat archetype: rifle (default), breacher (shotgun rusher), marksman (long-range) ----
+    const rollR = Math.random();
+    const breacherW = Math.min(0.34, 0.14 + this.wave * 0.02);
+    const marksmanW = Math.min(0.26, 0.1 + this.wave * 0.018);
+    const role: Enemy['role'] = rollR < breacherW ? 'breacher' : rollR < breacherW + marksmanW ? 'marksman' : 'rifle';
+    // role beacon lamp on the left shoulder so you can read the threat at a glance
+    const lampCol = role === 'breacher' ? 0xff8b2a : role === 'marksman' ? 0x55d7ff : 0x3a4750;
+    const lamp = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.045, 0.045, 0.05, 8),
+      new THREE.MeshStandardMaterial({ color: 0x111417, emissive: lampCol, emissiveIntensity: role === 'rifle' ? 0.5 : 2.2, roughness: 0.4 }),
+    );
+    lamp.rotation.z = Math.PI / 2;
+    lamp.position.set(0.02, 0.02, 0.1);
+    model.shoulderL.add(lamp);
+
     // per-enemy cloned materials for hit-flash
     const flashMats: THREE.MeshStandardMaterial[] = [];
     const cloneMat = (m: THREE.Mesh) => {
@@ -1106,16 +1134,19 @@ export class Engine {
     reg(model.headMesh, 'head');
     for (const m of model.bodyMeshes) reg(m, 'body');
 
+    const baseSpeed = Math.min(4.0, 2.3 + (this.wave - 1) * 0.15) * (2 - model.bulk);
     const e: Enemy = {
-      id, model, hp: Math.round((45 + (this.wave - 1) * 10) * model.bulk), // armored variants soak more
+      id, model,
+      hp: Math.round((45 + (this.wave - 1) * 10) * model.bulk * (role === 'breacher' ? 1.35 : role === 'marksman' ? 0.85 : 1)),
       state: 'rise', t: 0, strafeDir: Math.random() > 0.5 ? 1 : -1,
       strafeT: 1 + Math.random(), burst: 0, burstT: 0,
-      shotT: 1.2 + Math.random() * 1.2,
-      speed: Math.min(4.0, 2.3 + (this.wave - 1) * 0.15) * (2 - model.bulk), // heavier gear, slower boots
-      prefDist: 10 + Math.random() * 6,
+      shotT: role === 'marksman' ? 1.6 + Math.random() : 1.2 + Math.random() * 1.2,
+      speed: baseSpeed * (role === 'breacher' ? 1.45 : role === 'marksman' ? 0.72 : 1),
+      prefDist: role === 'breacher' ? 3.5 + Math.random() * 2 : role === 'marksman' ? 19 + Math.random() * 7 : 10 + Math.random() * 6,
       walkPhase: Math.random() * 6,
       flashT: 0, flashMats, fallDir: (Math.random() - 0.5) * 0.6,
       skin, seed: Math.random() * 100, fireKick: 0, hurtT: 0, hurtX: 0, hurtZ: 0,
+      role,
       rag: null,
     };
     this.enemies.push(e);
@@ -1268,6 +1299,47 @@ export class Engine {
     w.reloadT = 0;
     sfx.reload(w.cfg.reloadTime);
     this.hudDirty = true;
+  }
+
+  private toggleFireMode() {
+    const w = this.curWeapon();
+    if (!w.cfg.auto) return; // semi-only weapons have nothing to toggle
+    w.mode = w.mode === 0 ? 1 : 0;
+    w.burstLeft = 0;
+    sfx.fireMode(w.mode === 1);
+    this.hooks.event({ type: 'pickup', text: w.mode === 1 ? `${w.cfg.short} — 3-RD BURST` : `${w.cfg.short} — FULL AUTO` });
+    this.hudDirty = true;
+  }
+
+  /** Quick stock-strike: staggers and damages anything in a short cone ahead. */
+  private melee() {
+    const w = this.curWeapon();
+    if (w.meleeT > 0 || w.reloadT >= 0) return;
+    w.meleeT = 0.55;
+    w.meleeK = 1;
+    w.kickV = 0.9;
+
+    const fwd = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'));
+    fwd.y = 0;
+    fwd.normalize();
+    let connected = false;
+    for (const e of this.enemies) {
+      if (e.state !== 'live') continue;
+      const gp = e.model.group.position;
+      const dx = gp.x - this.pos.x, dz = gp.z - this.pos.z;
+      const d = Math.hypot(dx, dz);
+      if (d > 2.4) continue;
+      const dot = (dx / (d || 1)) * fwd.x + (dz / (d || 1)) * fwd.z;
+      if (dot < 0.55) continue; // must be roughly in front
+      connected = true;
+      this.damageEnemy(e, 60, false, gp.clone().setY(1.1));
+      // knock them back harder than a bullet would
+      e.hurtT = 1.4;
+      e.hurtX = (dx / (d || 1)) * 2.4;
+      e.hurtZ = (dz / (d || 1)) * 2.4;
+    }
+    sfx.melee(connected);
+    this.shake = Math.min(1.0, this.shake + 0.16);
   }
 
   private tryFire() {
@@ -1447,19 +1519,37 @@ export class Engine {
 
   private enemyFire(e: Enemy) {
     const muzzlePos = e.model.muzzle.getWorldPosition(new THREE.Vector3());
-    const target = this.pos.clone();
-    target.y -= 0.25;
-    const dist = muzzlePos.distanceTo(target);
-    // aim error
-    const errScale = dist * 0.055 * (1 + Math.random());
-    target.x += (Math.random() - 0.5) * errScale;
-    target.y += (Math.random() - 0.5) * errScale * 0.5;
-    target.z += (Math.random() - 0.5) * errScale;
+    const base = this.pos.clone();
+    base.y -= 0.25;
+    const dist = muzzlePos.distanceTo(base);
 
     e.model.flash.visible = true;
     setTimeout(() => { e.model.flash.visible = false; }, 55);
-    e.fireKick = 1; // shoulder + rifle recoil anim
-    sfx.enemyShoot(dist);
+
+    if (e.role === 'breacher') {
+      sfx.enemyShotgun(dist);
+      e.fireKick = 1.3;
+      for (let k = 0; k < 6; k++) {
+        this.enemyShot(muzzlePos, base, dist, 0.17, () => Math.round(3 + Math.random() * 4 + Math.min(6, this.wave)));
+      }
+    } else if (e.role === 'marksman') {
+      sfx.enemyMarksman(dist);
+      e.fireKick = 1.1;
+      this.enemyShot(muzzlePos, base, dist, 0.012, () => Math.round(10 + Math.random() * 6 + Math.min(12, this.wave)));
+    } else {
+      sfx.enemyShoot(dist);
+      e.fireKick = 1;
+      this.enemyShot(muzzlePos, base, dist, 1.0, () => Math.round(5 + Math.random() * 4 + Math.min(9, this.wave)));
+    }
+  }
+
+  /** One hitscan pellet: spread tracer, cover interception, and a hit roll. */
+  private enemyShot(muzzlePos: THREE.Vector3, base: THREE.Vector3, dist: number, spreadMul: number, dmgRoll: () => number) {
+    const target = base.clone();
+    const errScale = dist * 0.055 * (1 + Math.random()) * spreadMul;
+    target.x += (Math.random() - 0.5) * errScale;
+    target.y += (Math.random() - 0.5) * errScale * 0.5;
+    target.z += (Math.random() - 0.5) * errScale;
     this.tracer(this.tracersE, muzzlePos, target);
 
     // does cover intercept?
@@ -1469,16 +1559,16 @@ export class Engine {
     const blockers = this.raycaster.intersectObjects(this.solidMeshes, false);
     if (blockers.length > 0 && blockers[0].distance < dist - 0.4) {
       const h = blockers[0];
-      this.burst(h.point, 'spark', 5, 2.2, 6, 0.3);
+      this.burst(h.point, 'spark', 4, 2.2, 6, 0.3);
       if (h.face) this.decal(h.point, h.face.normal.clone().transformDirection(h.object.matrixWorld));
       return; // saved by cover
     }
-    // hit roll
     const speedXZ = Math.hypot(this.vel.x, this.vel.z);
-    const p = Math.max(0.1, Math.min(0.6, 0.52 - dist * 0.011 - speedXZ * 0.04 + this.wave * 0.012));
+    const accMul = spreadMul > 1 ? 0.75 : spreadMul < 0.5 ? 1.15 : 1;
+    const p = Math.max(0.08, Math.min(0.6, (0.52 - dist * 0.011 - speedXZ * 0.04 + this.wave * 0.012) * accMul));
     if (Math.random() < p) {
-      this.damagePlayer(Math.round(5 + Math.random() * 4 + Math.min(9, this.wave)));
-      this.burst(this.tmpV.copy(this.pos).setY(this.pos.y - 0.5), 'blood', 5, 2, 7, 0.4);
+      this.damagePlayer(dmgRoll());
+      this.burst(this.tmpV.copy(this.pos).setY(this.pos.y - 0.5), 'blood', 4, 2, 7, 0.4);
     }
   }
 
@@ -1644,10 +1734,11 @@ export class Engine {
     // braced in ADS the flip is heavily suppressed so the sight picture stays on target
     const flipMul = m.stock ? 0.75 : 1.15;
     const kvAds = wantAds ? 0.38 : 1;
-    g.position.y += (anchor.y + this.swayY * 0.5 + bobY * 0.6 - kv * 0.02 * flipMul * kvAds - re * 0.085 + reJerk - g.position.y) * lerpF;
-    g.position.z += (anchor.z + kv * (m.stock ? 0.055 : 0.115) * kvAds + re * 0.05 - g.position.z) * lerpF;
+    const mk = w.meleeK; // melee jab: drives the gun forward and dips the muzzle
+    g.position.y += (anchor.y + this.swayY * 0.5 + bobY * 0.6 - kv * 0.02 * flipMul * kvAds - re * 0.085 + reJerk - mk * 0.04 - g.position.y) * lerpF;
+    g.position.z += (anchor.z + kv * (m.stock ? 0.055 : 0.115) * kvAds + re * 0.05 - mk * 0.2 - g.position.z) * lerpF;
     // aim error is baked into the barrel: the gun visibly whips off-aim where the bullet actually goes
-    g.rotation.x = kv * (m.stock ? 0.085 : 0.21) * (m.action === 'slide' ? 1.1 : 1) * kvAds - w.aimJitX * adsK - re * 0.6;
+    g.rotation.x = kv * (m.stock ? 0.085 : 0.21) * (m.action === 'slide' ? 1.1 : 1) * kvAds - w.aimJitX * adsK - re * 0.6 - mk * 0.5;
     g.rotation.z = this.swayX * 1.6 + this.recRoll * 0.9 - re * 0.52;
     g.rotation.y = this.swayX * 1.1 + w.aimJitY * adsK + re * 0.24;
     w.kickV *= Math.exp(-10 * dt);
@@ -1690,11 +1781,26 @@ export class Engine {
     }
     this.gunLight.intensity *= Math.exp(-28 * dt);
 
-    if (this.mouseDown && w.cfg.auto) this.tryFire();
-    if (this.firePressed) {
+    w.meleeT = Math.max(0, w.meleeT - dt);
+    w.meleeK = Math.max(0, w.meleeK - dt * 3.2);
+
+    if (!w.cfg.auto) {
+      if (this.firePressed) { this.firePressed = false; this.tryFire(); }
+    } else if (w.mode === 0) {
+      // full-auto: hold to pour it on
+      if (this.mouseDown || this.firePressed) this.tryFire();
       this.firePressed = false;
-      if (!w.cfg.auto) this.tryFire();
-      else this.tryFire();
+    } else {
+      // 3-round burst: one trigger pull queues a burst, then a beat before the next
+      if (this.firePressed) {
+        this.firePressed = false;
+        if (w.burstLeft <= 0 && w.cooldown <= 0) w.burstLeft = 3;
+      }
+      if (w.burstLeft > 0 && w.cooldown <= 0) {
+        this.tryFire();
+        w.burstLeft--;
+        if (w.burstLeft === 0) w.cooldown = Math.max(w.cooldown, 0.30);
+      }
     }
   }
 
@@ -1889,14 +1995,26 @@ export class Engine {
         for (const m of e.flashMats) m.emissiveIntensity = k;
       }
 
-      // --- firing ---
+      // --- firing (role-driven cadence) ---
       e.shotT -= dt;
       if (e.shotT <= 0 && e.burst <= 0) {
-        if (los && dist > 3) {
-          e.burst = 2 + Math.floor(Math.random() * 3) + Math.min(2, Math.floor(this.wave / 3));
-          e.burstT = 0.12;
+        if (los) {
+          if (e.role === 'breacher') {
+            if (dist < 9.5) { e.burst = 1; e.burstT = 0.1; }
+            e.shotT = 0.85 + Math.random() * 0.5;
+          } else if (e.role === 'marksman') {
+            if (dist > 3) { e.burst = 1; e.burstT = 0.3; }
+            e.shotT = Math.max(1.6, 2.6 - this.wave * 0.06) + Math.random() * 0.8;
+          } else {
+            if (dist > 3) {
+              e.burst = 2 + Math.floor(Math.random() * 3) + Math.min(2, Math.floor(this.wave / 3));
+              e.burstT = 0.12;
+            }
+            e.shotT = Math.max(0.95, 1.9 - this.wave * 0.07) + Math.random() * 0.9;
+          }
+        } else {
+          e.shotT = 0.5;
         }
-        e.shotT = Math.max(0.95, 1.9 - this.wave * 0.07) + Math.random() * 0.9;
       }
       if (e.burst > 0) {
         e.burstT -= dt;
@@ -2058,7 +2176,10 @@ export class Engine {
       phase: this.phase,
       health: Math.ceil(this.health),
       weaponIndex: this.weaponIndex,
-      weapons: this.weapons.map((x) => ({ name: x.cfg.name, short: x.cfg.short, mag: x.mag, reserve: x.reserve, auto: x.cfg.auto })),
+      weapons: this.weapons.map((x) => ({
+        name: x.cfg.name, short: x.cfg.short, mag: x.mag, reserve: x.reserve, auto: x.cfg.auto,
+        mode: x.cfg.auto ? (x.mode === 0 ? 'AUTO' : 'BURST') : 'SEMI',
+      })),
       wave: this.wave,
       enemiesLeft: this.spawnQueue + alive,
       score: this.score,

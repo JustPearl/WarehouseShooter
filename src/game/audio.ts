@@ -140,6 +140,32 @@ class Sfx {
     this.tone('square', 640, 600, 0.02, 0.2, 0.06);
   }
 
+  fireMode(burst: boolean) {
+    this.tone('square', burst ? 620 : 430, burst ? 660 : 400, 0.022, 0.2);
+    this.tone('square', burst ? 880 : 560, burst ? 930 : 520, 0.02, 0.16, 0.05);
+  }
+
+  melee(connected: boolean) {
+    this.noise(0.1, 0.3, 'highpass', 900, 2600, 0.7); // whoosh
+    if (connected) {
+      this.tone('sine', 110, 40, 0.14, 0.5);
+      this.noise(0.08, 0.4, 'bandpass', 500, 180, 1.2);
+    }
+  }
+
+  enemyShotgun(dist: number) {
+    const vol = Math.min(0.5, Math.max(0.1, 0.55 - dist * 0.012));
+    this.noise(0.22, vol, 'lowpass', 1400, 90, 0.7);
+    this.tone('sine', 100, 34, 0.2, vol * 0.9);
+    this.noise(0.08, vol * 0.5, 'bandpass', 900, 300, 1.1);
+  }
+
+  enemyMarksman(dist: number) {
+    const vol = Math.min(0.45, Math.max(0.08, 0.5 - dist * 0.011));
+    this.noise(0.16, vol, 'bandpass', 2600, 500, 1.3); // sharp supersonic crack
+    this.tone('sine', 170, 46, 0.16, vol * 0.8);
+  }
+
   pickup() {
     this.tone('sine', 560, 980, 0.11, 0.3);
     this.tone('sine', 840, 1400, 0.1, 0.2, 0.08);
