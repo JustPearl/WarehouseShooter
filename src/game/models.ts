@@ -45,118 +45,182 @@ function addFlash(parent: THREE.Object3D, scale: number): THREE.Sprite {
 
 /* ============================================================
    KODIAK .45 — original heavy-frame sidearm
-   Forward = -Z. Roughly real-world scale.
+   True proportions at 1.6× first-person scale (real compact .45:
+   ~19cm long, ~13.5cm tall, ~3cm wide). Forward = -Z.
+   Bore axis at y=0; iron-sight line at y=+0.055 (engine ads.y = -0.055).
    ============================================================ */
 export function buildPistol(): WeaponModel {
   const g = new THREE.Group();
 
-  // slide with stepped front
-  g.add(box(0.056, 0.062, 0.27, steel, 0, 0, -0.045));
-  g.add(box(0.048, 0.05, 0.05, steel, 0, -0.002, -0.195));
-  // slide serrations
-  for (let i = 0; i < 5; i++) g.add(box(0.06, 0.05, 0.006, steelDark, 0, 0, 0.02 + i * 0.014));
-  // barrel / muzzle crown
-  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.0135, 0.0135, 0.06, 10), steelDark);
+  // ---- slide: 26cm long, 4.8 wide, 6.8 tall (real 16.3×3×4.3cm) ----
+  g.add(box(0.048, 0.068, 0.26, steel, 0, 0, -0.035)); // spans z -0.165..+0.095
+  g.add(box(0.042, 0.056, 0.06, steel, 0, -0.004, -0.175)); // stepped muzzle-end bushing
+  g.add(box(0.048, 0.060, 0.008, steelDark, 0, -0.002, 0.094)); // slide rear cap
+  // rear + front serrations
+  for (let i = 0; i < 6; i++) g.add(box(0.052, 0.056, 0.005, steelDark, 0, -0.002, 0.032 + i * 0.012));
+  for (let i = 0; i < 4; i++) g.add(box(0.050, 0.048, 0.005, steelDark, 0, -0.004, -0.104 - i * 0.012));
+  // ejection port (right side) + extractor detail
+  g.add(box(0.012, 0.026, 0.046, steelDark, 0.022, 0.004, -0.005));
+  g.add(box(0.006, 0.008, 0.03, steelDark, 0.026, 0.022, 0.01));
+  // barrel + recessed crown
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.05, 12), steelDark);
   barrel.rotation.x = Math.PI / 2;
-  barrel.position.set(0, 0.004, -0.235);
+  barrel.position.set(0, 0, -0.19);
   g.add(barrel);
-  const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.019, 0.016, 0.02, 10), steel);
+  const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.012, 0.022, 12), steel);
   crown.rotation.x = Math.PI / 2;
-  crown.position.set(0, 0.004, -0.255);
+  crown.position.set(0, 0, -0.206);
   g.add(crown);
-  // frame + rail
-  g.add(box(0.05, 0.042, 0.2, steelDark, 0, -0.052, -0.03));
-  g.add(box(0.042, 0.014, 0.12, steel, 0, -0.028, -0.11));
-  // trigger guard + trigger
-  g.add(box(0.012, 0.05, 0.014, steelDark, 0, -0.085, -0.055));
-  g.add(box(0.04, 0.012, 0.014, steelDark, 0, -0.105, -0.035));
-  g.add(box(0.008, 0.03, 0.008, amberPart, 0, -0.078, -0.035));
-  // grip, angled
-  const grip = box(0.052, 0.125, 0.05, polymer, 0, -0.135, 0.045);
-  grip.rotation.x = 0.3;
+
+  // ---- frame, dust cover & accessory rail ----
+  g.add(box(0.044, 0.046, 0.19, steelDark, 0, -0.057, -0.03)); // spans y -0.034..-0.080
+  g.add(box(0.038, 0.016, 0.10, steel, 0, -0.034, -0.115));
+  g.add(box(0.040, 0.006, 0.014, steelDark, 0, -0.026, -0.135)); // rail slot
+  g.add(box(0.040, 0.006, 0.014, steelDark, 0, -0.026, -0.105));
+  // takedown pin + slide stop (left side)
+  g.add(box(0.050, 0.008, 0.008, steel, 0, -0.038, -0.06));
+  g.add(box(0.006, 0.014, 0.034, steelDark, -0.024, -0.042, 0.0));
+
+  // ---- trigger guard + amber trigger ----
+  g.add(box(0.010, 0.052, 0.012, steelDark, 0, -0.102, -0.075)); // front strap
+  g.add(box(0.010, 0.012, 0.052, steelDark, 0, -0.124, -0.045)); // bottom
+  g.add(box(0.007, 0.030, 0.008, amberPart, 0, -0.094, -0.045));
+
+  // ---- grip, angled like a real service pistol ----
+  const grip = box(0.054, 0.135, 0.068, polymer, 0, -0.130, 0.045);
+  grip.rotation.x = 0.30;
   g.add(grip);
-  g.add(box(0.056, 0.02, 0.054, amberPart, 0, -0.192, 0.062).rotateX(0.3));
-  // hammer + beavertail
-  g.add(box(0.02, 0.03, 0.02, steel, 0, 0.012, 0.09));
-  g.add(box(0.05, 0.02, 0.045, steelDark, 0, -0.04, 0.085));
-  // sights — front fiber post, rear notch
-  const fs = box(0.009, 0.02, 0.009, steelDark, 0, 0.041, -0.185);
-  g.add(fs);
-  g.add(box(0.005, 0.008, 0.005, sightGlow, 0, 0.05, -0.185));
-  g.add(box(0.016, 0.016, 0.012, steelDark, -0.02, 0.038, 0.06));
-  g.add(box(0.016, 0.016, 0.012, steelDark, 0.02, 0.038, 0.06));
+  // grip side panels (textured) + finger-groove hint
+  const panelL = box(0.006, 0.095, 0.052, steelDark, -0.029, -0.128, 0.044);
+  panelL.rotation.x = 0.30;
+  g.add(panelL);
+  const panelR = box(0.006, 0.095, 0.052, steelDark, 0.029, -0.128, 0.044);
+  panelR.rotation.x = 0.30;
+  g.add(panelR);
+  const baseplate = box(0.050, 0.014, 0.064, amberPart, 0, -0.194, 0.064);
+  baseplate.rotation.x = 0.30;
+  g.add(baseplate);
+
+  // ---- hammer, beavertail, mainspring housing, thumb safety ----
+  g.add(box(0.014, 0.024, 0.014, steel, 0, 0.028, 0.100));
+  g.add(box(0.046, 0.016, 0.038, steelDark, 0, -0.035, 0.082));
+  g.add(box(0.040, 0.030, 0.028, steelDark, 0, -0.055, 0.076));
+  g.add(box(0.006, 0.012, 0.022, amberPart, -0.026, -0.030, 0.028));
+
+  // ---- sights: rear notch + front fiber post, sight line at y=0.055 ----
+  g.add(box(0.040, 0.010, 0.012, steelDark, 0, 0.039, 0.072));
+  g.add(box(0.010, 0.014, 0.010, steelDark, -0.014, 0.048, 0.072));
+  g.add(box(0.010, 0.014, 0.010, steelDark, 0.014, 0.048, 0.072));
+  g.add(box(0.008, 0.020, 0.008, steelDark, 0, 0.045, -0.152));
+  g.add(box(0.0045, 0.007, 0.0045, sightGlow, 0, 0.0515, -0.152));
+  // amber slide accent lines
+  g.add(box(0.004, 0.008, 0.10, amberPart, -0.0255, -0.012, -0.02));
+  g.add(box(0.004, 0.008, 0.10, amberPart, 0.0255, -0.012, -0.02));
 
   const muzzle = new THREE.Object3D();
-  muzzle.position.set(0, 0.004, -0.27);
+  muzzle.position.set(0, 0, -0.22);
   muzzle.rotation.y = Math.PI; // gun is built facing -Z: make +Z point down the barrel
   g.add(muzzle);
-  const flash = addFlash(muzzle, 0.3);
+  const flash = addFlash(muzzle, 0.24);
 
   return { group: g, muzzle, flash };
 }
 
 /* ============================================================
    PTARMIGAN M9 — original compact 9mm PDW / SMG, full-auto
-   Forward = -Z.
+   True proportions at 1.5× first-person scale (real compact PDW:
+   ~47cm with stock out, ~24cm tall, ~5.5cm wide). Forward = -Z.
+   Bore axis at y=+0.006; red-dot center at y=+0.088 (engine ads.y = -0.088).
+   Total length ~74cm vs the pistol's ~32cm — a true rifle-to-sidearm ratio.
    ============================================================ */
 export function buildSMG(): WeaponModel {
   const g = new THREE.Group();
 
-  // receiver
-  g.add(box(0.062, 0.078, 0.34, steel, 0, 0, -0.02));
-  g.add(box(0.066, 0.05, 0.2, steelDark, 0, -0.012, -0.05));
-  // top rail + reflex sight
-  g.add(box(0.042, 0.016, 0.3, steelDark, 0, 0.047, -0.03));
-  const sight = box(0.036, 0.05, 0.055, polymer, 0, 0.085, -0.06);
-  g.add(sight);
-  g.add(box(0.028, 0.034, 0.006, new THREE.MeshStandardMaterial({ color: 0x0d1114, metalness: 0.2, roughness: 0.2 }), 0, 0.085, -0.086));
-  const dot = new THREE.Mesh(new THREE.SphereGeometry(0.0035, 8, 8), sightGlow);
-  dot.position.set(0, 0.085, -0.084);
+  // ---- receiver: 28cm long (real ~19cm), slim PDW profile ----
+  g.add(box(0.058, 0.072, 0.28, steel, 0, 0, -0.01)); // spans z -0.15..+0.13
+  g.add(box(0.054, 0.042, 0.17, steelDark, 0, -0.020, 0.015)); // lower receiver
+  g.add(box(0.012, 0.024, 0.044, steelDark, 0.026, 0.006, 0.015)); // ejection port
+  // top rail + reflex sight — dot centered at y=0.088
+  g.add(box(0.040, 0.014, 0.26, steelDark, 0, 0.043, -0.02));
+  g.add(box(0.034, 0.046, 0.052, polymer, 0, 0.080, -0.055));
+  g.add(box(0.026, 0.034, 0.004, new THREE.MeshStandardMaterial({ color: 0x0d1114, metalness: 0.2, roughness: 0.2 }), 0, 0.084, -0.080));
+  const dot = new THREE.Mesh(new THREE.SphereGeometry(0.0032, 8, 8), sightGlow);
+  dot.position.set(0, 0.088, -0.078);
   g.add(dot);
-  // barrel shroud with vent ports
-  const shroud = new THREE.Mesh(new THREE.CylinderGeometry(0.023, 0.023, 0.24, 12), steel);
+  // backup iron post over the shroud root
+  g.add(box(0.006, 0.022, 0.006, steelDark, 0, 0.058, -0.140));
+
+  // ---- barrel shroud with vent slots + hand stop ----
+  const shroud = new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.021, 0.21, 12), steel);
   shroud.rotation.x = Math.PI / 2;
-  shroud.position.set(0, 0.008, -0.3);
+  shroud.position.set(0, 0.006, -0.265); // spans -0.16..-0.37
   shroud.castShadow = true;
   g.add(shroud);
-  for (let i = 0; i < 3; i++) {
-    g.add(box(0.05, 0.012, 0.02, steelDark, 0, 0.008, -0.24 - i * 0.055));
-  }
-  // muzzle brake
-  const brake = new THREE.Mesh(new THREE.CylinderGeometry(0.017, 0.013, 0.05, 10), steelDark);
+  for (let i = 0; i < 3; i++) g.add(box(0.046, 0.010, 0.022, steelDark, 0, 0.006, -0.210 - i * 0.055));
+  g.add(box(0.046, 0.018, 0.014, steelDark, 0, -0.020, -0.345)); // hand stop
+
+  // ---- barrel + muzzle brake ----
+  const barrelTip = new THREE.Mesh(new THREE.CylinderGeometry(0.010, 0.010, 0.06, 10), steelDark);
+  barrelTip.rotation.x = Math.PI / 2;
+  barrelTip.position.set(0, 0.006, -0.385);
+  g.add(barrelTip);
+  const brake = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.012, 0.045, 10), steelDark);
   brake.rotation.x = Math.PI / 2;
-  brake.position.set(0, 0.008, -0.445);
+  brake.position.set(0, 0.006, -0.395);
   g.add(brake);
-  // angled magazine with amber band
-  const mag = box(0.036, 0.17, 0.06, polymer, 0, -0.115, -0.045);
-  mag.rotation.x = -0.16;
+
+  // ---- magwell + 30-round stick mag (real ~20cm) with ribs & amber band ----
+  g.add(box(0.060, 0.034, 0.070, steelDark, 0, -0.050, -0.038));
+  const mag = box(0.052, 0.21, 0.060, polymer, 0, -0.135, -0.045);
+  mag.rotation.x = -0.12;
   g.add(mag);
-  const band = box(0.038, 0.02, 0.062, amberPart, 0, -0.075, -0.05);
-  band.rotation.x = -0.16;
+  const ribA = box(0.054, 0.006, 0.062, steelDark, 0, -0.115, -0.047);
+  ribA.rotation.x = -0.12;
+  g.add(ribA);
+  const ribB = box(0.054, 0.006, 0.062, steelDark, 0, -0.165, -0.053);
+  ribB.rotation.x = -0.12;
+  g.add(ribB);
+  const band = box(0.054, 0.016, 0.062, amberPart, 0, -0.235, -0.058);
+  band.rotation.x = -0.12;
   g.add(band);
-  // foregrip
-  const fg = box(0.03, 0.075, 0.038, polymer, 0, -0.062, -0.185);
-  fg.rotation.x = 0.24;
+
+  // ---- angled foregrip with finger grooves ----
+  const fg = box(0.030, 0.088, 0.040, polymer, 0, -0.072, -0.220);
+  fg.rotation.x = 0.20;
   g.add(fg);
-  // pistol grip + trigger guard
-  const pg = box(0.04, 0.105, 0.045, polymer, 0, -0.09, 0.1);
-  pg.rotation.x = 0.32;
+  const grA = box(0.032, 0.010, 0.042, steelDark, 0, -0.058, -0.212);
+  grA.rotation.x = 0.20;
+  g.add(grA);
+  const grB = box(0.032, 0.010, 0.042, steelDark, 0, -0.086, -0.228);
+  grB.rotation.x = 0.20;
+  g.add(grB);
+
+  // ---- pistol grip, trigger group, selector, charging handle ----
+  const pg = box(0.052, 0.150, 0.060, polymer, 0, -0.115, 0.095);
+  pg.rotation.x = 0.30;
   g.add(pg);
-  g.add(box(0.01, 0.045, 0.012, steelDark, 0, -0.062, 0.045));
-  g.add(box(0.008, 0.026, 0.008, amberPart, 0, -0.055, 0.058));
-  // folding stock
-  g.add(box(0.014, 0.04, 0.16, steelDark, -0.026, 0.01, 0.22));
-  g.add(box(0.014, 0.04, 0.16, steelDark, 0.026, 0.01, 0.22));
-  g.add(box(0.07, 0.075, 0.03, polymer, 0, 0.005, 0.3));
-  g.add(box(0.074, 0.075, 0.012, amberPart, 0, 0.005, 0.318));
-  // charging handle
-  g.add(box(0.012, 0.012, 0.05, amberPart, 0.042, 0.03, 0.02));
+  const pgCap = box(0.048, 0.012, 0.056, amberPart, 0, -0.188, 0.118);
+  pgCap.rotation.x = 0.30;
+  g.add(pgCap);
+  g.add(box(0.010, 0.050, 0.012, steelDark, 0, -0.075, 0.035)); // guard front
+  g.add(box(0.010, 0.012, 0.060, steelDark, 0, -0.098, 0.065)); // guard bottom
+  g.add(box(0.008, 0.026, 0.008, amberPart, 0, -0.068, 0.060)); // trigger
+  g.add(box(0.008, 0.020, 0.010, amberPart, -0.033, -0.004, 0.055)); // selector
+  g.add(box(0.010, 0.010, 0.046, amberPart, 0.036, 0.020, 0.030)); // charging handle
+
+  // ---- folding stock: hinge, twin arms, buttpad (extends total to ~74cm) ----
+  g.add(box(0.030, 0.050, 0.030, steelDark, 0, 0.008, 0.145)); // hinge block
+  g.add(box(0.008, 0.008, 0.020, amberPart, -0.030, 0.008, 0.145)); // hinge pin
+  g.add(box(0.013, 0.034, 0.15, steelDark, -0.024, 0.010, 0.22));
+  g.add(box(0.013, 0.034, 0.15, steelDark, 0.024, 0.010, 0.22));
+  g.add(box(0.062, 0.070, 0.024, polymer, 0, 0.006, 0.305));
+  g.add(box(0.066, 0.074, 0.010, amberPart, 0, 0.006, 0.320));
 
   const muzzle = new THREE.Object3D();
-  muzzle.position.set(0, 0.008, -0.475);
+  muzzle.position.set(0, 0.006, -0.42);
   muzzle.rotation.y = Math.PI; // gun is built facing -Z: make +Z point down the barrel
   g.add(muzzle);
-  const flash = addFlash(muzzle, 0.36);
+  const flash = addFlash(muzzle, 0.30);
 
   return { group: g, muzzle, flash };
 }
