@@ -1289,6 +1289,7 @@ export class Engine {
     const imp = w.cfg.kick * m.caliberImpulse;
     // shouldering the weapon braces it: sights aligned = climb, drift and roll all shrink
     const adsMul = this.ads ? (m.stock ? 0.40 : 0.52) : 1;
+    const adsVert = this.ads ? (m.stock ? 0.42 : 0.62) : 1; // vertical kick tamed further — ADS must stay on target
     const mv = 0.8 + Math.random() * m.varRange; // per-shot character; heavy calibers vary more
     const weightShake = 1.12 / Math.sqrt(m.weightKg); // heavier guns rattle the shooter less
 
@@ -1318,7 +1319,7 @@ export class Engine {
       rollI = (Math.random() - 0.5) * imp * m.rollAmp;
       if (Math.random() < 0.09) yawI *= 1.9;
     }
-    this.recPitch += pitchI * adsMul;
+    this.recPitch += pitchI * adsMul * adsVert;
     this.recYaw += yawI * adsMul;
     this.recRoll += rollI * adsMul * (m.stock ? 0.7 : 1);
     this.shake = Math.min(1.0, this.shake + imp * (m.stock ? 7.5 : 11) * weightShake * mv * adsMul);
@@ -1329,10 +1330,10 @@ export class Engine {
     // slaps forward with a small upward tap
     if (m.action === 'slide') {
       w.echoT = 0.07 + Math.random() * 0.05;
-      w.echoMag = -(imp * (0.26 + Math.random() * 0.3));
+      w.echoMag = -(imp * (0.26 + Math.random() * 0.3) * adsMul);
     } else {
       w.echoT = 0.032 + Math.random() * 0.03;
-      w.echoMag = imp * (0.14 + Math.random() * 0.14);
+      w.echoMag = imp * (0.14 + Math.random() * 0.14) * adsMul;
     }
 
     // --- aim error lives IN the gun: recovery lag + heat bloom + movement (baked into barrel orientation) ---
@@ -1593,10 +1594,11 @@ export class Engine {
     const bobY = Math.sin(this.bobPhase * 2) * 0.028 * bobAmp;
     const bobX = Math.cos(this.bobPhase) * 0.016 * bobAmp;
 
-    // recoil recovery (deliberately slower than the impulse, so sustained fire climbs)
-    const rec = Math.min(1, dt * 6.5);
-    this.recPitch += (0 - this.recPitch) * rec;
-    this.recYaw += (0 - this.recYaw) * Math.min(1, dt * 7.5);
+    // recovery: from the hip the gun climbs; braced in ADS it snaps back toward the sight line
+    const recP = Math.min(1, dt * (this.ads ? 11 : 6.5));
+    const recY = Math.min(1, dt * (this.ads ? 12 : 7.5));
+    this.recPitch += (0 - this.recPitch) * recP;
+    this.recYaw += (0 - this.recYaw) * recY;
     this.recRoll += (0 - this.recRoll) * Math.min(1, dt * 11);
     this.shake *= Math.exp(-9 * dt);
     this.fovKick *= Math.exp(-9 * dt);
@@ -1638,12 +1640,14 @@ export class Engine {
     // smoothed muzzle flip (ramps in, per-shot magnitude)
     w.kickVis += (w.kickV - w.kickVis) * Math.min(1, dt * 16);
     const kv = w.kickVis * w.kickVar;
-    // a stock pivots the gun and absorbs flip; a stockless slide pistol whips up and jumps back
+    // a stock pivots the gun and absorbs flip; a stockless slide pistol whips up and jumps back.
+    // braced in ADS the flip is heavily suppressed so the sight picture stays on target
     const flipMul = m.stock ? 0.75 : 1.15;
-    g.position.y += (anchor.y + this.swayY * 0.5 + bobY * 0.6 - kv * 0.02 * flipMul - re * 0.085 + reJerk - g.position.y) * lerpF;
-    g.position.z += (anchor.z + kv * (m.stock ? 0.055 : 0.115) + re * 0.05 - g.position.z) * lerpF;
+    const kvAds = wantAds ? 0.38 : 1;
+    g.position.y += (anchor.y + this.swayY * 0.5 + bobY * 0.6 - kv * 0.02 * flipMul * kvAds - re * 0.085 + reJerk - g.position.y) * lerpF;
+    g.position.z += (anchor.z + kv * (m.stock ? 0.055 : 0.115) * kvAds + re * 0.05 - g.position.z) * lerpF;
     // aim error is baked into the barrel: the gun visibly whips off-aim where the bullet actually goes
-    g.rotation.x = kv * (m.stock ? 0.085 : 0.21) * (m.action === 'slide' ? 1.1 : 1) - w.aimJitX * adsK - re * 0.6;
+    g.rotation.x = kv * (m.stock ? 0.085 : 0.21) * (m.action === 'slide' ? 1.1 : 1) * kvAds - w.aimJitX * adsK - re * 0.6;
     g.rotation.z = this.swayX * 1.6 + this.recRoll * 0.9 - re * 0.52;
     g.rotation.y = this.swayX * 1.1 + w.aimJitY * adsK + re * 0.24;
     w.kickV *= Math.exp(-10 * dt);

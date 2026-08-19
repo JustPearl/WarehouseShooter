@@ -508,7 +508,7 @@ const ARMORY = [
     mode: 'FULL-AUTO PDW',
     spec: ['9×19MM', '2.45 KG', 'FOLDING STOCK', 'BLOWBACK'],
     desc: 'Compact 9mm storm. The stock drinks the roll — recoil climbs in a weave, short bursts keep it level.',
-    recoil: 'BRACED CLIMB — LAZY S-CURVE DRIFT',
+    recoil: 'BRACED CLIMB — NEAR-FLAT IN ADS',
     stats: [
       ['DMG', 40, true],
       ['ROF', 92, false],
