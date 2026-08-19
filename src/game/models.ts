@@ -156,9 +156,12 @@ export function buildSMG(): WeaponModel {
 
   // ---- barrel nut + free-float handguard (17.5cm) with M-LOK slots ----
   g.add(box(0.056, 0.044, 0.022, steelDark, 0, 0.004, -0.096));
-  const shroud = new THREE.Mesh(new THREE.CylinderGeometry(0.027, 0.027, 0.175, 8), steel);
+  // octagonal profile: roll the cross-section in the GEOMETRY (around the cylinder's own axis)
+  // so the flats sit flat top/bottom/sides — a mesh rotation.z here would skew the whole axis
+  const shroudGeo = new THREE.CylinderGeometry(0.027, 0.027, 0.175, 8);
+  shroudGeo.rotateY(Math.PI / 8);
+  const shroud = new THREE.Mesh(shroudGeo, steel);
   shroud.rotation.x = Math.PI / 2;
-  shroud.rotation.z = Math.PI / 8;
   shroud.position.set(0, 0.002, -0.195); // z -0.107..-0.282
   shroud.castShadow = true;
   g.add(shroud);
