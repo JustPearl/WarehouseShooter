@@ -1,0 +1,169 @@
+/* Procedural WebAudio SFX — no assets, everything synthesized. */
+
+type OscType = OscillatorType;
+
+class Sfx {
+  private ctx: AudioContext | null = null;
+  private master: GainNode | null = null;
+  private noiseBuf: AudioBuffer | null = null;
+
+  /** Must be called from a user gesture. */
+  init() {
+    if (this.ctx) {
+      if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+      return;
+    }
+    try {
+      const AC: typeof AudioContext =
+        window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      this.ctx = new AC();
+      this.master = this.ctx.createGain();
+      this.master.gain.value = 0.5;
+      this.master.connect(this.ctx.destination);
+      // shared white-noise buffer
+      const len = this.ctx.sampleRate;
+      this.noiseBuf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+      const d = this.noiseBuf.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      this.startWind();
+    } catch {
+      this.ctx = null;
+    }
+  }
+
+  private startWind() {
+    if (!this.ctx || !this.master || !this.noiseBuf) return;
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    src.loop = true;
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 240;
+    lp.Q.value = 0.6;
+    const g = this.ctx.createGain();
+    g.gain.value = 0.05;
+    const lfo = this.ctx.createOscillator();
+    lfo.frequency.value = 0.11;
+    const lfoG = this.ctx.createGain();
+    lfoG.gain.value = 0.028;
+    lfo.connect(lfoG);
+    lfoG.connect(g.gain);
+    src.connect(lp).connect(g).connect(this.master);
+    src.start();
+    lfo.start();
+  }
+
+  private tone(type: OscType, f0: number, f1: number, dur: number, vol: number, when = 0) {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime + when;
+    const o = this.ctx.createOscillator();
+    o.type = type;
+    o.frequency.setValueAtTime(Math.max(20, f0), t);
+    o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+    o.connect(g).connect(this.master);
+    o.start(t);
+    o.stop(t + dur + 0.02);
+  }
+
+  private noise(dur: number, vol: number, filterType: BiquadFilterType, f0: number, f1: number, q = 0.8, when = 0) {
+    if (!this.ctx || !this.master || !this.noiseBuf) return;
+    const t = this.ctx.currentTime + when;
+    const s = this.ctx.createBufferSource();
+    s.buffer = this.noiseBuf;
+    s.loop = true;
+    const f = this.ctx.createBiquadFilter();
+    f.type = filterType;
+    f.Q.value = q;
+    f.frequency.setValueAtTime(Math.max(40, f0), t);
+    f.frequency.exponentialRampToValueAtTime(Math.max(40, f1), t + dur);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+    s.connect(f).connect(g).connect(this.master);
+    s.start(t);
+    s.stop(t + dur + 0.02);
+  }
+
+  shoot(kind: 'pistol' | 'smg', ads: boolean) {
+    const v = ads ? 0.85 : 1;
+    if (kind === 'pistol') {
+      this.noise(0.16, 0.85 * v, 'lowpass', 2200, 160, 0.7);
+      this.tone('sine', 150, 44, 0.13, 0.7 * v);
+      this.tone('square', 800, 220, 0.03, 0.16 * v);
+    } else {
+      this.noise(0.085, 0.55 * v, 'lowpass', 3400, 420, 0.7);
+      this.tone('square', 240, 90, 0.05, 0.22 * v);
+      this.noise(0.05, 0.2 * v, 'highpass', 1400, 2400, 0.7);
+    }
+  }
+
+  enemyShoot(dist: number) {
+    const vol = Math.min(0.4, Math.max(0.06, 0.42 - dist * 0.013));
+    this.noise(0.11, vol, 'bandpass', 700, 300, 1.1);
+    this.tone('sine', 130, 50, 0.09, vol * 0.7);
+  }
+
+  impact() {
+    this.noise(0.06, 0.22, 'bandpass', 1800, 700, 1.4);
+  }
+
+  hit(head: boolean) {
+    this.tone('triangle', head ? 2400 : 1750, head ? 1900 : 1400, 0.05, 0.3);
+  }
+
+  kill() {
+    this.tone('sine', 320, 70, 0.2, 0.42);
+    this.tone('triangle', 1300, 900, 0.06, 0.2, 0.02);
+  }
+
+  hurt() {
+    this.tone('sawtooth', 120, 52, 0.22, 0.5);
+    this.noise(0.18, 0.3, 'lowpass', 500, 120, 0.8);
+  }
+
+  empty() {
+    this.tone('square', 340, 300, 0.025, 0.22);
+  }
+
+  reload(dur: number) {
+    this.tone('square', 720, 660, 0.03, 0.26);
+    this.tone('square', 520, 470, 0.03, 0.24, dur * 0.4);
+    this.noise(0.05, 0.2, 'bandpass', 900, 1400, 1.2, dur * 0.75);
+    this.tone('square', 900, 820, 0.035, 0.28, dur * 0.92);
+  }
+
+  switchWeapon() {
+    this.tone('square', 430, 400, 0.02, 0.2);
+    this.tone('square', 640, 600, 0.02, 0.2, 0.06);
+  }
+
+  pickup() {
+    this.tone('sine', 560, 980, 0.11, 0.3);
+    this.tone('sine', 840, 1400, 0.1, 0.2, 0.08);
+  }
+
+  waveHorn() {
+    this.tone('sawtooth', 68, 46, 1.05, 0.4);
+    this.tone('sawtooth', 69.5, 47, 1.05, 0.32);
+    this.tone('sine', 96, 38, 0.8, 0.42, 0.05);
+  }
+
+  waveClear() {
+    this.tone('sine', 420, 640, 0.14, 0.3);
+    this.tone('sine', 640, 900, 0.18, 0.26, 0.12);
+  }
+
+  step() {
+    this.noise(0.05, 0.075, 'lowpass', 420, 160, 0.8);
+  }
+
+  death() {
+    this.tone('sawtooth', 90, 28, 1.4, 0.5);
+    this.noise(1.1, 0.35, 'lowpass', 900, 60, 0.7);
+  }
+}
+
+export const sfx = new Sfx();
