@@ -21,11 +21,14 @@ const DEFAULT_HUD: HudState = {
   sprint: false,
   regen: false,
   atts: [],
+  streak: 0,
+  streakT: 0,
 };
 
 interface FeedItem { id: number; weapon: string; head: boolean; n: number }
 interface HitMark { id: number; kill: boolean; head: boolean }
 interface Banner { id: number; title: string; sub: string; tone: 'warn' | 'good' }
+interface ScorePop { id: number; text: string; x: number; y: number; head: boolean }
 
 /* ---------- tiny inline SVG icons ---------- */
 const IconSkull = () => (
@@ -283,6 +286,8 @@ export default function App() {
   const [dmgId, setDmgId] = useState(0);
   const [banner, setBanner] = useState<Banner | null>(null);
   const [toast, setToast] = useState<{ id: number; text: string } | null>(null);
+  const [pops, setPops] = useState<ScorePop[]>([]);
+  const popSeq = useRef(0);
   const [stats, setStats] = useState<EndStats | null>(null);
   const [menuView, setMenuView] = useState<'root' | 'manual' | 'settings' | 'loadout'>('root');
   const [manualSec, setManualSec] = useState('brief');
@@ -340,6 +345,15 @@ export default function App() {
       case 'pickup':
         setToast({ id: Date.now(), text: e.text });
         break;
+      case 'streak':
+        setBanner({ id: Date.now(), title: e.label, sub: `×${e.n} SCORE CHAIN`, tone: 'good' });
+        break;
+      case 'scorepop': {
+        const id = ++popSeq.current;
+        setPops((ps) => [...ps.slice(-7), { id, text: e.text, x: e.x, y: e.y, head: e.head }]);
+        setTimeout(() => setPops((ps) => ps.filter((p) => p.id !== id)), 950);
+        break;
+      }
       case 'gameover':
         setStats(e.stats);
         break;
@@ -419,6 +433,30 @@ export default function App() {
               <div className="mt-1 text-sm font-semibold tracking-[0.42em] text-[#ffab3d]">{banner.sub}</div>
             </div>
           )}
+
+          {/* kill chain */}
+          {hud.streak >= 2 && (
+            <div key={hud.streak} className="fx-streak absolute left-1/2 top-[33%] -translate-x-1/2 text-center">
+              <span className="font-display text-4xl text-[#ffab3d]" style={{ textShadow: '0 0 20px rgba(255,157,46,0.55), 0 2px 0 rgba(0,0,0,0.7)' }}>
+                ×{hud.streak}
+              </span>
+              <span className="ml-2 align-middle text-[10px] font-bold tracking-[0.4em] text-[#ff7a45]">CHAIN</span>
+              <div className="mx-auto mt-1 h-[3px] w-28 bg-[rgba(255,157,46,0.18)]">
+                <div className="h-full bg-[#ffab3d]" style={{ width: `${Math.round(hud.streakT * 100)}%` }} />
+              </div>
+            </div>
+          )}
+
+          {/* floating score pops */}
+          {pops.map((p) => (
+            <div
+              key={p.id}
+              className={`fx-pop font-display pointer-events-none absolute text-xl ${p.head ? 'text-[#ff5c33]' : 'text-[#ffc46e]'}`}
+              style={{ left: `${Math.round(p.x * 100)}%`, top: `${Math.round(p.y * 100)}%`, textShadow: '0 1px 0 rgba(0,0,0,0.8)' }}
+            >
+              {p.text}
+            </div>
+          ))}
 
           {/* pickup toast */}
           {toast && (

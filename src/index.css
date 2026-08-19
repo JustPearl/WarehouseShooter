@@ -98,6 +98,8 @@ html, body, #root {
 .fx-kenburns { animation: kfKen 26s ease-in-out infinite alternate; }
 .fx-feed { animation: kfFeed 2.8s ease forwards; }
 .fx-blink { animation: kfBlink 0.9s steps(2) infinite; }
+.fx-pop { animation: kfPop 0.95s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.fx-streak { animation: kfStreak 0.3s cubic-bezier(0.16, 1, 0.3, 1) both; }
 .fx-pop { animation: kfPop 0.85s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
 .fx-streak { animation: kfStreak 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
 
