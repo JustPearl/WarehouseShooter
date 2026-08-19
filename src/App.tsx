@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Engine } from './game/engine';
 import type { EndStats, GameEvent, HudState } from './game/engine';
+import { sfx } from './game/audio';
 
 const MENU_BG = 'https://image.qwenlm.ai/generated-images/1257f3b2-7150-473b-9d84-c30ad3b818bb/_result.png';
 
@@ -9,8 +10,8 @@ const DEFAULT_HUD: HudState = {
   health: 100,
   weaponIndex: 0,
   weapons: [
-    { name: 'KODIAK .45', short: 'KDK .45', mag: 8, reserve: 56, auto: false, mode: 'SEMI' },
-    { name: 'PTARMIGAN M9', short: 'PTM 9MM', mag: 30, reserve: 150, auto: true, mode: 'AUTO' },
+    { name: 'KODIAK .45', short: 'KDK .45', mag: 8, reserve: 56, auto: false, mode: 'SEMI', atts: [] },
+    { name: 'PTARMIGAN M9', short: 'PTM 9MM', mag: 30, reserve: 150, auto: true, mode: 'AUTO', atts: [] },
   ],
   wave: 0,
   enemiesLeft: 0,
@@ -21,6 +22,7 @@ const DEFAULT_HUD: HudState = {
   ads: false,
   sprint: false,
   regen: false,
+  atts: [],
 };
 
 interface FeedItem { id: number; weapon: string; head: boolean; n: number }
@@ -61,6 +63,26 @@ function loadSens(): number {
     return Number.isFinite(v) && v > 0 ? v : 1;
   } catch { return 1; }
 }
+function loadLoadout(): { p: string[]; s: string[] } {
+  try {
+    const raw = JSON.parse(localStorage.getItem('wp_loadout') || '');
+    if (raw && Array.isArray(raw.p) && Array.isArray(raw.s)) return { p: raw.p, s: raw.s };
+  } catch { /* ignore */ }
+  return { p: [], s: [] };
+}
+
+/* ---------- attachment catalog (ids match the engine's ATT_MODS) ---------- */
+interface AttDef { id: string; name: string; slot: string; weapon: 'p' | 's' | 'both'; good: string; bad: string }
+const ATTACHMENTS: AttDef[] = [
+  { id: 'supp',   name: 'MONOBLOC SUPPRESSOR',   slot: 'MUZZLE',     weapon: 'both', good: 'RECOIL −12% · FLASH TAMED · SUBSONIC REPORT', bad: 'DAMAGE −8% · SLOWER SIGHT RAISE' },
+  { id: 'comp',   name: 'AGGRESSOR COMPENSATOR', slot: 'MUZZLE',     weapon: 'both', good: 'VERTICAL RECOIL −25%',                        bad: 'SPREAD +30% · LOUDER FLASH CONE' },
+  { id: 'xmag',   name: 'EXTENDED MAGAZINE',     slot: 'MAGAZINE',   weapon: 'both', good: '+4 RDS (.45) / +10 RDS (9MM)',                bad: 'RELOAD +25% · SLOWER HANDLING' },
+  { id: 'laser',  name: 'TACTICAL LASER',        slot: 'UNDERBARREL', weapon: 'both', good: 'HIP-FIRE BLOOM −45% · MOVE PENALTY −50%',     bad: 'RECOIL +5–8% · BEAM GIVES YOU AWAY' },
+  { id: 'vgrip',  name: 'ANGLED GRIP',           slot: 'UNDERBARREL', weapon: 's',    good: 'VERTICAL RECOIL −22%',                        bad: 'MOVE PENALTY +22% · SLOWER ADS' },
+  { id: 'rdot',   name: 'MINI REFLEX SIGHT',     slot: 'OPTIC',      weapon: 's',    good: 'SNAPPIER SIGHT PICTURE · −30% ADS LAG',       bad: 'HIP SPREAD +12% · TOP-HEAVY' },
+  { id: 'match',  name: 'MATCH TRIGGER',         slot: 'INTERNAL',   weapon: 'p',    good: 'FIRE RATE +12% · FASTER RECOVERY',            bad: 'SHOT CONSISTENCY −35%' },
+  { id: 'lslide', name: 'LONGSLIDE KIT',         slot: 'INTERNAL',   weapon: 'p',    good: '−15% ADS LAG · RECOIL −8%',                   bad: 'SLOWER SIGHT RAISE · HEAVY FRONT' },
+];
 
 function SettingToggle({ label, desc, value, onToggle }: { label: string; desc: string; value: boolean; onToggle: () => void }) {
   return (
@@ -77,16 +99,70 @@ function SettingToggle({ label, desc, value, onToggle }: { label: string; desc: 
           value ? 'border-[#ffab3d] bg-[rgba(255,171,61,0.16)]' : 'border-[rgba(127,183,201,0.4)] bg-[rgba(10,20,27,0.6)] group-hover:border-[#9cc3d2]'
         }`}
       >
-        <span
-          className={`absolute top-[3px] h-[14px] w-[22px] transition-all duration-150 ${
-            value ? 'left-[22px] bg-[#ffab3d] shadow-[0_0_9px_rgba(255,171,61,0.65)]' : 'left-[3px] bg-[#7fb7c9]'
-          }`}
-        />
-      </span>
-    </button>
+      <span
+        className={`absolute top-[3px] h-[14px] w-[22px] transition-all duration-150 ${
+          value ? 'left-[22px] bg-[#ffab3d] shadow-[0_0_9px_rgba(255,171,61,0.65)]' : 'left-[3px] bg-[#7fb7c9]'
+        }`}
+      />
+    </span>
+  </button>
   );
 }
 
+/* ---------- loadout panel ---------- */
+function LoadoutPanel({
+  loadout, onToggle,
+}: {
+  loadout: { p: string[]; s: string[] };
+  onToggle: (w: 'p' | 's', id: string) => void;
+}) {
+  const col = (wk: 'p' | 's', title: string, sub: string) => (
+    <div className="hud-plate min-w-0 flex-1 px-5 py-4">
+      <div className="flex items-baseline justify-between">
+        <span className="font-display text-lg text-[#ffab3d]">{title}</span>
+        <span className="text-[9px] font-bold tracking-[0.26em] text-[#7fb7c9]">{sub}</span>
+      </div>
+      <div className="mt-3 space-y-2">
+        {ATTACHMENTS.filter((a) => a.weapon === wk || a.weapon === 'both').map((a) => {
+          const equipped = loadout[wk].includes(a.id);
+          const conflict = !equipped && loadout[wk].some((x) => ATTACHMENTS.find((y) => y.id === x)?.slot === a.slot);
+          return (
+            <button
+              key={a.id}
+              onClick={() => onToggle(wk, a.id)}
+              className={`block w-full border px-3 py-2 text-left transition-all duration-150 ${
+                equipped
+                  ? 'border-[#ffab3d] bg-[rgba(255,171,61,0.10)] shadow-[0_0_14px_rgba(255,171,61,0.15)]'
+                  : 'border-[rgba(127,183,201,0.22)] bg-[rgba(8,16,22,0.5)] hover:border-[rgba(191,234,245,0.55)] hover:bg-[rgba(127,183,201,0.08)]'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className={`font-display text-[13px] tracking-wide ${equipped ? 'text-[#ffab3d]' : 'text-[#bfeaf5]'}`}>{a.name}</span>
+                <span className="flex items-center gap-2">
+                  <span className="border border-[rgba(127,183,201,0.3)] px-1.5 py-[1px] text-[8px] font-bold tracking-[0.22em] text-[#7fb7c9]">{a.slot}</span>
+                  <span className={`px-2 py-[2px] text-[9px] font-bold tracking-[0.22em] ${equipped ? 'bg-[#ffab3d] text-[#10131a]' : 'border border-[rgba(127,183,201,0.4)] text-[#7fb7c9]'}`}>
+                    {equipped ? 'FITTED' : conflict ? 'SLOT USED' : 'EQUIP'}
+                  </span>
+                </span>
+              </div>
+              <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[10px] font-semibold tracking-[0.1em]">
+                <span className="text-[#63e6b0]">▲ {a.good}</span>
+                <span className="text-[#ff8a70]">▼ {a.bad}</span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="flex w-full max-w-4xl flex-col gap-4 lg:flex-row">
+      {col('p', 'KODIAK .45', 'SIDEARM')}
+      {col('s', 'PTARMIGAN M9', 'PRIMARY')}
+    </div>
+  );
+}
 function fmtTime(s: number) {
   const m = Math.floor(s / 60);
   const ss = Math.floor(s % 60);
@@ -105,10 +181,30 @@ export default function App() {
   const [banner, setBanner] = useState<Banner | null>(null);
   const [toast, setToast] = useState<{ id: number; text: string } | null>(null);
   const [stats, setStats] = useState<EndStats | null>(null);
-  const [menuView, setMenuView] = useState<'root' | 'manual' | 'settings'>('root');
+  const [menuView, setMenuView] = useState<'root' | 'manual' | 'settings' | 'loadout'>('root');
   const [manualSec, setManualSec] = useState('brief');
   const [crosshairOn, setCrosshairOn] = useState<boolean>(loadXhair);
   const [sens, setSens] = useState<number>(loadSens);
+  const [loadout, setLoadout] = useState<{ p: string[]; s: string[] }>(loadLoadout);
+  const [showLoadout, setShowLoadout] = useState(false);
+
+  const toggleAtt = useCallback((wk: 'p' | 's', id: string) => {
+    setLoadout((prev) => {
+      const list = prev[wk];
+      let next: string[];
+      if (list.includes(id)) {
+        next = list.filter((x) => x !== id);
+      } else {
+        const slot = ATTACHMENTS.find((a) => a.id === id)?.slot;
+        next = [...list.filter((x) => ATTACHMENTS.find((a) => a.id === x)?.slot !== slot), id];
+      }
+      const merged = { ...prev, [wk]: next };
+      try { localStorage.setItem('wp_loadout', JSON.stringify(merged)); } catch { /* ignore */ }
+      engineRef.current?.applyLoadout([...merged.p.map((x) => `p:${x}`), ...merged.s.map((x) => `s:${x}`)]);
+      sfx.ui();
+      return merged;
+    });
+  }, []);
   const toggleCrosshair = useCallback(() => {
     setCrosshairOn((v) => {
       const n = !v;
@@ -152,6 +248,9 @@ export default function App() {
     const engine = new Engine(canvasRef.current, { hud: setHud, event: onEvent });
     engineRef.current = engine;
     engine.boot();
+    engine.setSensitivity(loadSens());
+    const lo = loadLoadout();
+    engine.applyLoadout([...lo.p.map((x) => `p:${x}`), ...lo.s.map((x) => `s:${x}`)]);
     return () => {
       engine.dispose();
       engineRef.current = null;
@@ -297,6 +396,18 @@ export default function App() {
                 {w.auto ? `${w.mode} · V` : w.mode}
               </span>
             </div>
+            {w.atts.length > 0 && (
+              <div className="mt-1 flex justify-end gap-1">
+                {w.atts.map((a) => {
+                  const def = ATTACHMENTS.find((x) => x.id === a);
+                  return (
+                    <span key={a} title={def?.name} className="border border-[rgba(255,171,61,0.4)] bg-[rgba(255,171,61,0.08)] px-1.5 py-[1px] text-[8px] font-bold tracking-[0.18em] text-[#ffab3d]">
+                      {def ? def.slot : a.toUpperCase()}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
             <div className="mt-0.5 flex items-end justify-end gap-2">
               <span className={`font-display text-5xl leading-none ${w.mag === 0 ? 'fx-blink text-[#ff3b30]' : w.mag <= Math.ceil(WEAPON_MAGS[hud.weaponIndex] * 0.25) ? 'text-[#ffab3d]' : 'text-[#bfeaf5]'}`}>
                 {w.mag.toString().padStart(2, '0')}
@@ -360,6 +471,9 @@ export default function App() {
                   <button className="btn-mil px-14 py-4 text-xl" onClick={start}>DEPLOY ▸</button>
                   <button className="btn-ghost flex items-center gap-2 text-xs" onClick={() => setMenuView('manual')}>
                     FIELD MANUAL
+                  </button>
+                  <button className="btn-ghost flex items-center gap-2 text-xs" onClick={() => setMenuView('loadout')}>
+                    LOADOUT
                   </button>
                   <button className="btn-ghost flex items-center gap-2 text-xs" onClick={() => setMenuView('settings')}>
                     <IconGear /> SETTINGS
@@ -535,29 +649,59 @@ export default function App() {
             </div>
           )}
 
+          {/* ---------- LOADOUT: fit attachments, one per slot per weapon ---------- */}
+          {menuView === 'loadout' && (
+            <div className="fx-rise absolute inset-0 flex flex-col bg-[rgba(3,8,12,0.93)]">
+              <div className="flex items-center justify-between border-b border-[rgba(127,183,201,0.18)] px-8 py-4 md:px-14">
+                <div>
+                  <div className="text-[10px] font-bold tracking-[0.4em] text-[#7fb7c9]">OPERATION WHITEOUT</div>
+                  <h2 className="font-display text-3xl text-[#bfeaf5]">WEAPON LOADOUT</h2>
+                </div>
+                <button className="btn-ghost text-xs" onClick={() => setMenuView('root')}>◂ BACK</button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto px-8 py-8 md:px-14">
+                <div className="mb-5 max-w-4xl text-[11px] font-semibold tracking-[0.18em] text-[#7fb7c9]">
+                  <span className="text-[#ff5c33]">ARMORY RULES //</span> ONE PART PER SLOT PER WEAPON. EVERY MOD CARRIES A COST — FITTING APPLIES IMMEDIATELY.
+                </div>
+                <LoadoutPanel loadout={loadout} onToggle={toggleAtt} />
+              </div>
+            </div>
+          )}
+
         </div>
       )}
 
       {/* ======================= PAUSE ======================= */}
       {hud.phase === 'paused' && (
         <div className="pointer-events-auto absolute inset-0 flex items-center justify-center bg-[rgba(3,7,10,0.78)]">
-          <div className="fx-rise hud-plate px-12 py-10 text-center">
-            <div className="text-[11px] font-bold tracking-[0.4em] text-[#7fb7c9]">OPERATION SUSPENDED</div>
-            <h2 className="font-display mt-1 text-5xl text-[#bfeaf5]">STAND BY</h2>
-            <div className="mx-auto mt-3 h-[3px] w-16 bg-[#ffab3d]" />
-            <p className="mt-3 text-sm font-semibold tracking-[0.14em] text-[#7fb7c9]">CURSOR RELEASED — THE STORM HOLDS ITS BREATH</p>
+          {!showLoadout ? (
+            <div className="fx-rise hud-plate px-12 py-10 text-center">
+              <div className="text-[11px] font-bold tracking-[0.4em] text-[#7fb7c9]">OPERATION SUSPENDED</div>
+              <h2 className="font-display mt-1 text-5xl text-[#bfeaf5]">STAND BY</h2>
+              <div className="mx-auto mt-3 h-[3px] w-16 bg-[#ffab3d]" />
+              <p className="mt-3 text-sm font-semibold tracking-[0.14em] text-[#7fb7c9]">CURSOR RELEASED — THE STORM HOLDS ITS BREATH</p>
 
-            <div className="mx-auto mt-6 w-72 border-t border-[rgba(127,183,201,0.18)] px-2 pt-3">
-              <div className="text-left text-[9px] font-bold tracking-[0.32em] text-[#7fb7c9]">FIELD SETTINGS</div>
-              <SettingToggle label="CROSSHAIR" desc="ON-SCREEN RETICLE OVERLAY" value={crosshairOn} onToggle={toggleCrosshair} />
-            </div>
+              <div className="mx-auto mt-6 w-72 border-t border-[rgba(127,183,201,0.18)] px-2 pt-3">
+                <div className="text-left text-[9px] font-bold tracking-[0.32em] text-[#7fb7c9]">FIELD SETTINGS</div>
+                <SettingToggle label="CROSSHAIR" desc="ON-SCREEN RETICLE OVERLAY" value={crosshairOn} onToggle={toggleCrosshair} />
+              </div>
 
-            <div className="mt-5 flex flex-col items-center gap-3">
-              <button className="btn-mil w-64" onClick={resume}>RESUME ▸</button>
-              <button className="btn-ghost w-64" onClick={start}>RESTART OPERATION</button>
-              <button className="btn-ghost w-64" onClick={toMenu}>ABANDON — MAIN MENU</button>
+              <div className="mt-5 flex flex-col items-center gap-3">
+                <button className="btn-mil w-64" onClick={() => { setShowLoadout(false); resume(); }}>RESUME ▸</button>
+                <button className="btn-ghost w-64" onClick={() => setShowLoadout(true)}>WEAPON LOADOUT</button>
+                <button className="btn-ghost w-64" onClick={start}>RESTART OPERATION</button>
+                <button className="btn-ghost w-64" onClick={toMenu}>ABANDON — MAIN MENU</button>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="fx-rise max-h-[92vh] w-[min(96vw,64rem)] overflow-y-auto">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="font-display text-2xl text-[#bfeaf5]">WEAPON LOADOUT <span className="text-[11px] tracking-[0.3em] text-[#7fb7c9]">// APPLIES ON RESUME</span></h2>
+                <button className="btn-ghost text-xs" onClick={() => setShowLoadout(false)}>◂ BACK TO STANDBY</button>
+              </div>
+              <LoadoutPanel loadout={loadout} onToggle={toggleAtt} />
+            </div>
+          )}
         </div>
       )}
 

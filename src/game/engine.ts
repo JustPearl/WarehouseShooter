@@ -15,6 +15,7 @@ export interface WeaponHud {
   mag: number;
   reserve: number;
   auto: boolean;
+  atts: string[];
   mode: string; // 'SEMI' | 'AUTO' | 'BURST'
 }
 
@@ -28,12 +29,12 @@ export interface HudState {
   score: number;
   kills: number;
   reload: number; // -1 = not reloading, else 0..1
-  gap: number; // crosshair gap px
+      gap: number; // crosshair gap px
   ads: boolean;
   sprint: boolean;
   regen: boolean; // out-of-combat vitals restore active
+  atts: string[]; // equipped attachment ids on the active weapon
 }
-
 export interface EndStats {
   score: number;
   kills: number;
@@ -1169,7 +1170,7 @@ export class Engine {
     this.interT = 2.2;
     this.weaponIndex = 0;
     this.weapons.forEach((w, i) => {
-      w.mag = w.cfg.magSize;
+      w.mag = w.cfg.magSize + w.mod.magAdd;
       w.reserve = w.cfg.startReserve;
       w.cooldown = 0;
       w.heat = 0;
@@ -1484,9 +1485,9 @@ export class Engine {
 
   private startReload() {
     const w = this.curWeapon();
-    if (w.reloadT >= 0 || w.mag >= w.cfg.magSize || w.reserve <= 0) return;
+    if (w.reloadT >= 0 || w.mag >= w.cfg.magSize + w.mod.magAdd || w.reserve <= 0) return;
     w.reloadT = 0;
-    sfx.reload(w.cfg.reloadTime);
+    sfx.reload(w.cfg.reloadTime * w.mod.reload);
     this.hudDirty = true;
   }
 
@@ -1587,7 +1588,7 @@ export class Engine {
     const flMat = w.model.flash.material as THREE.SpriteMaterial;
     const flBase = w.flashBase * w.mod.flash;
     w.model.flash.scale.set(flBase, flBase, 1);
-    w.model.flash.visible = flMat.opacity !== 0 && w.mod.flash > 0.05;
+    w.model.flash.visible = w.mod.flash > 0.05;
     flMat.rotation = Math.random() * Math.PI;
     this.flashT = 0.045;
     this.gunLight.intensity = 26 * w.mod.flash;
@@ -1615,7 +1616,7 @@ export class Engine {
         if (enemy) {
           this.shotsHit++;
           const head = ud.part === 'head';
-          this.damageEnemy(enemy, w.cfg.dmg * (head ? w.cfg.headMul : 1), head, h.point);
+          this.damageEnemy(enemy, w.cfg.dmg * w.mod.dmg * (head ? w.cfg.headMul : 1), head, h.point);
         }
       } else {
         if (ud.kind === 'floor') {
@@ -1857,7 +1858,7 @@ export class Engine {
     const rm = cw.cfg.recoil;
     const idleFor = this.simT - cw.lastFireT;
     if (idleFor > rm.recovDelay) {
-      const recMul = this.ads ? 1.6 : 1; // braced sights settle back faster
+      const recMul = (this.ads ? 1.6 : 1) * cw.mod.recov; // braced sights settle back faster
       this.recTgtP *= Math.exp(-rm.recovPitch * recMul * dt);
       this.recTgtY *= Math.exp(-rm.recovYaw * recMul * dt);
     }
@@ -1865,7 +1866,7 @@ export class Engine {
     this.fovKick *= Math.exp(-9 * dt);
 
     // the camera snaps to the recoil offset quickly (~40ms attack) — punchy, never teleported
-    const att = Math.min(1, dt * 26);
+    const att = Math.min(1, dt * 26 * (this.ads ? 1 / cw.mod.adsErr : 1));
     this.recP += (this.recTgtP - this.recP) * att;
     this.recY += (this.recTgtY - this.recY) * att;
 
@@ -1889,7 +1890,7 @@ export class Engine {
     const adsK = wantAds ? 0.34 : 1;
     const m = w.cfg.recoil; // stock/grip/action shape how the gun moves in the hands
     const anchor = wantAds ? w.cfg.ads : w.cfg.hip;
-    const lerpF = Math.min(1, dt * (wantAds ? 13 : 10));
+    const lerpF = Math.min(1, dt * (wantAds ? 13 * w.mod.adsSpeed : 10));
     const g = w.model.group;
 
     // simple reload animation: dip + roll toward the off-hand, sine envelope (no mag mesh animation)
@@ -1936,8 +1937,8 @@ export class Engine {
     if (w.reloadT >= 0) {
       w.reloadT += dt;
       this.hudDirty = true;
-      if (w.reloadT >= w.cfg.reloadTime) {
-        const take = Math.min(w.reserve, w.cfg.magSize - w.mag);
+      if (w.reloadT >= w.cfg.reloadTime * w.mod.reload) {
+        const take = Math.min(w.reserve, w.cfg.magSize + w.mod.magAdd - w.mag);
         w.mag += take;
         w.reserve -= take;
         w.reloadT = -1;
@@ -2491,14 +2492,16 @@ export class Engine {
       weapons: this.weapons.map((x) => ({
         name: x.cfg.name, short: x.cfg.short, mag: x.mag, reserve: x.reserve, auto: x.cfg.auto,
         mode: x.cfg.auto ? (x.mode === 0 ? 'AUTO' : 'BURST') : 'SEMI',
+        atts: Object.keys(x.attNodes).filter((a) => x.attNodes[a].visible),
       })),
       wave: this.wave,
       enemiesLeft: this.spawnQueue + alive,
       score: this.score,
       kills: this.kills,
-      reload: w.reloadT >= 0 ? w.reloadT / w.cfg.reloadTime : -1,
+      reload: w.reloadT >= 0 ? w.reloadT / (w.cfg.reloadTime * w.mod.reload) : -1,
       gap: this.ads ? 3 : Math.round(6 + jit * 260),
       ads: this.ads,
+      atts: Object.keys(w.attNodes).filter((a) => w.attNodes[a].visible),
       sprint: !!(this.keys['ShiftLeft'] || this.keys['ShiftRight']),
       regen: this.health < 100 && this.health > 0 && this.simT - this.lastDamageT > 5,
     });
