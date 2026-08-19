@@ -1023,13 +1023,14 @@ export class Engine {
     this.camera.updateProjectionMatrix();
 
     // weapon rig placement (sway + bob + kick)
-    this.swayX += ((-this.swayMX * 0.0004) - this.swayX) * Math.min(1, dt * 10);
-    this.swayMX *= Math.exp(-12 * dt);
-    this.swayY += ((Math.abs(this.swayMX) * 0.00012) - this.swayY) * Math.min(1, dt * 10);
+    this.swayX += ((-this.swayMX * 0.00034) - this.swayX) * Math.min(1, dt * 14);
+    this.swayMX *= Math.exp(-15 * dt);
+    this.swayY += ((Math.abs(this.swayMX) * 0.0001) - this.swayY) * Math.min(1, dt * 14);
     const adsK = wantAds ? 0.34 : 1;
+    const inert = wantAds ? 0.16 : 1; // braced in the shoulder: the gun tracks the eye almost rigidly
     const m = w.cfg.recoil; // stock/grip/action shape how the gun moves in the hands
     const anchor = wantAds ? w.cfg.ads : w.cfg.hip;
-    const lerpF = Math.min(1, dt * (wantAds ? 13 * w.mod.adsSpeed : 10));
+    const lerpF = Math.min(1, dt * (wantAds ? 26 * w.mod.adsSpeed : 13));
     const g = w.model.group;
 
     // simple reload animation: dip + roll toward the off-hand, sine envelope (no mag mesh animation)
@@ -1037,7 +1038,7 @@ export class Engine {
     const re = rp >= 0 ? Math.sin(Math.PI * rp) : 0;
     const reJerk = rp >= 0 && (rp < 0.12 || rp > 0.85) ? Math.sin(rp * 140) * 0.006 : 0;
 
-    g.position.x += (anchor.x + this.swayX + bobX * 0.5 - re * 0.058 - g.position.x) * lerpF;
+    g.position.x += (anchor.x + (this.swayX + bobX * 0.42) * inert - re * 0.058 - g.position.x) * lerpF;
     // smoothed muzzle flip (ramps in, per-shot magnitude)
     w.kickVis += (w.kickV - w.kickVis) * Math.min(1, dt * 16);
     const kv = w.kickVis * w.kickVar;
@@ -1046,13 +1047,13 @@ export class Engine {
     const flipMul = m.stock ? 0.75 : 1.15;
     const kvAds = wantAds ? 0.38 : 1;
     const mk = w.meleeK; // melee jab: drives the gun forward and dips the muzzle
-    g.position.y += (anchor.y + this.swayY * 0.5 + bobY * 0.6 - kv * 0.02 * flipMul * kvAds - re * 0.085 + reJerk - mk * 0.04 - g.position.y) * lerpF;
+    g.position.y += (anchor.y + (this.swayY * 0.5 + bobY * 0.5) * inert - kv * 0.02 * flipMul * kvAds - re * 0.085 + reJerk - mk * 0.04 - g.position.y) * lerpF;
     g.position.z += (anchor.z + kv * (m.stock ? 0.055 : 0.115) * kvAds + re * 0.05 - mk * 0.2 - g.position.z) * lerpF;
     // aim error is baked into the barrel: the gun visibly whips off-aim where the bullet actually goes
     g.rotation.x = kv * (m.stock ? 0.085 : 0.21) * (m.action === 'slide' ? 1.1 : 1) * kvAds - w.aimJitX * adsK - re * 0.6 - mk * 0.5;
     // torque twist is cosmetic — the camera itself never rolls from recoil
-    g.rotation.z = this.swayX * 1.6 + Math.sin(this.simT * 42) * kv * 0.025 * m.rollAmp - re * 0.52;
-    g.rotation.y = this.swayX * 1.1 + w.aimJitY * adsK + re * 0.24;
+    g.rotation.z = this.swayX * 1.6 * inert + Math.sin(this.simT * 42) * kv * 0.025 * m.rollAmp - re * 0.52;
+    g.rotation.y = this.swayX * 1.1 * inert + w.aimJitY * adsK + re * 0.24;
     w.kickV *= Math.exp(-10 * dt);
   }
 
