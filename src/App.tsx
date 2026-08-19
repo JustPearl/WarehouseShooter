@@ -1,16 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Engine } from './game/engine';
-import type { EndStats, GameEvent, HudState } from './game/engine';
-
-const MENU_BG = 'https://image.qwenlm.ai/generated-images/1c805e54-4f16-4da6-8c13-d3c0cf599059/_result.png';
+import type { EndStats, GameEvent, HudState } from './game/types';
+import { sfx } from './game/audio';
 
 const DEFAULT_HUD: HudState = {
   phase: 'menu',
   health: 100,
   weaponIndex: 0,
   weapons: [
-    { name: 'KODIAK .45', short: 'KDK .45', mag: 8, reserve: 56, auto: false },
-    { name: 'PTARMIGAN M9', short: 'PTM 9MM', mag: 30, reserve: 150, auto: true },
+    { name: 'KODIAK .45', short: 'KDK .45', mag: 8, reserve: 56, auto: false, mode: 'SEMI', atts: [] },
+    { name: 'PTARMIGAN M9', short: 'PTM 9MM', mag: 30, reserve: 150, auto: true, mode: 'AUTO', atts: [] },
   ],
   wave: 0,
   enemiesLeft: 0,
@@ -20,11 +19,16 @@ const DEFAULT_HUD: HudState = {
   gap: 8,
   ads: false,
   sprint: false,
+  regen: false,
+  atts: [],
+  streak: 0,
+  streakT: 0,
 };
 
 interface FeedItem { id: number; weapon: string; head: boolean; n: number }
 interface HitMark { id: number; kill: boolean; head: boolean }
 interface Banner { id: number; title: string; sub: string; tone: 'warn' | 'good' }
+interface ScorePop { id: number; text: string; x: number; y: number; head: boolean }
 
 /* ---------- tiny inline SVG icons ---------- */
 const IconSkull = () => (
@@ -54,6 +58,32 @@ const IconGear = () => (
 function loadXhair(): boolean {
   try { return localStorage.getItem('wp_xhair') !== '0'; } catch { return true; }
 }
+function loadSens(): number {
+  try {
+    const v = parseFloat(localStorage.getItem('wp_sens') || '');
+    return Number.isFinite(v) && v > 0 ? v : 1;
+  } catch { return 1; }
+}
+function loadLoadout(): { p: string[]; s: string[] } {
+  try {
+    const raw = JSON.parse(localStorage.getItem('wp_loadout') || '');
+    if (raw && Array.isArray(raw.p) && Array.isArray(raw.s)) return { p: raw.p, s: raw.s };
+  } catch { /* ignore */ }
+  return { p: [], s: [] };
+}
+
+/* ---------- attachment catalog (ids match the engine's ATT_MODS) ---------- */
+interface AttDef { id: string; name: string; slot: string; weapon: 'p' | 's' | 'both'; good: string; bad: string }
+const ATTACHMENTS: AttDef[] = [
+  { id: 'supp',   name: 'MONOBLOC SUPPRESSOR',   slot: 'MUZZLE',     weapon: 'both', good: 'RECOIL −12% · FLASH TAMED · SUBSONIC REPORT', bad: 'DAMAGE −8% · SLOWER SIGHT RAISE' },
+  { id: 'comp',   name: 'AGGRESSOR COMPENSATOR', slot: 'MUZZLE',     weapon: 'both', good: 'VERTICAL RECOIL −25%',                        bad: 'SPREAD +30% · LOUDER FLASH CONE' },
+  { id: 'xmag',   name: 'EXTENDED MAGAZINE',     slot: 'MAGAZINE',   weapon: 'both', good: '+4 RDS (.45) / +10 RDS (9MM)',                bad: 'RELOAD +25% · SLOWER HANDLING' },
+  { id: 'laser',  name: 'TACTICAL LASER',        slot: 'UNDERBARREL', weapon: 'both', good: 'HIP-FIRE BLOOM −45% · MOVE PENALTY −50%',     bad: 'RECOIL +5–8% · BEAM GIVES YOU AWAY' },
+  { id: 'vgrip',  name: 'ANGLED GRIP',           slot: 'UNDERBARREL', weapon: 's',    good: 'VERTICAL RECOIL −22%',                        bad: 'MOVE PENALTY +22% · SLOWER ADS' },
+  { id: 'rdot',   name: 'MINI REFLEX SIGHT',     slot: 'OPTIC',      weapon: 's',    good: 'SNAPPIER SIGHT PICTURE · −30% ADS LAG',       bad: 'HIP SPREAD +12% · TOP-HEAVY' },
+  { id: 'match',  name: 'MATCH TRIGGER',         slot: 'INTERNAL',   weapon: 'p',    good: 'FIRE RATE +12% · FASTER RECOVERY',            bad: 'SHOT CONSISTENCY −35%' },
+  { id: 'lslide', name: 'LONGSLIDE KIT',         slot: 'INTERNAL',   weapon: 'p',    good: '−15% ADS LAG · RECOIL −8%',                   bad: 'SLOWER SIGHT RAISE · HEAVY FRONT' },
+];
 
 function SettingToggle({ label, desc, value, onToggle }: { label: string; desc: string; value: boolean; onToggle: () => void }) {
   return (
@@ -70,20 +100,179 @@ function SettingToggle({ label, desc, value, onToggle }: { label: string; desc: 
           value ? 'border-[#ffab3d] bg-[rgba(255,171,61,0.16)]' : 'border-[rgba(127,183,201,0.4)] bg-[rgba(10,20,27,0.6)] group-hover:border-[#9cc3d2]'
         }`}
       >
-        <span
-          className={`absolute top-[3px] h-[14px] w-[22px] transition-all duration-150 ${
-            value ? 'left-[22px] bg-[#ffab3d] shadow-[0_0_9px_rgba(255,171,61,0.65)]' : 'left-[3px] bg-[#7fb7c9]'
-          }`}
-        />
-      </span>
-    </button>
+      <span
+        className={`absolute top-[3px] h-[14px] w-[22px] transition-all duration-150 ${
+          value ? 'left-[22px] bg-[#ffab3d] shadow-[0_0_9px_rgba(255,171,61,0.65)]' : 'left-[3px] bg-[#7fb7c9]'
+        }`}
+      />
+    </span>
+  </button>
   );
 }
 
+/* ---------- loadout panel ---------- */
+function LoadoutPanel({
+  loadout, onToggle,
+}: {
+  loadout: { p: string[]; s: string[] };
+  onToggle: (w: 'p' | 's', id: string) => void;
+}) {
+  const col = (wk: 'p' | 's', title: string, sub: string) => (
+    <div className="hud-plate min-w-0 flex-1 px-5 py-4">
+      <div className="flex items-baseline justify-between">
+        <span className="font-display text-lg text-[#ffab3d]">{title}</span>
+        <span className="text-[9px] font-bold tracking-[0.26em] text-[#7fb7c9]">{sub}</span>
+      </div>
+      <div className="mt-3 space-y-2">
+        {ATTACHMENTS.filter((a) => a.weapon === wk || a.weapon === 'both').map((a) => {
+          const equipped = loadout[wk].includes(a.id);
+          const conflict = !equipped && loadout[wk].some((x) => ATTACHMENTS.find((y) => y.id === x)?.slot === a.slot);
+          return (
+            <button
+              key={a.id}
+              onClick={() => onToggle(wk, a.id)}
+              className={`block w-full border px-3 py-2 text-left transition-all duration-150 ${
+                equipped
+                  ? 'border-[#ffab3d] bg-[rgba(255,171,61,0.10)] shadow-[0_0_14px_rgba(255,171,61,0.15)]'
+                  : 'border-[rgba(127,183,201,0.22)] bg-[rgba(8,16,22,0.5)] hover:border-[rgba(191,234,245,0.55)] hover:bg-[rgba(127,183,201,0.08)]'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className={`font-display text-[13px] tracking-wide ${equipped ? 'text-[#ffab3d]' : 'text-[#bfeaf5]'}`}>{a.name}</span>
+                <span className="flex items-center gap-2">
+                  <span className="border border-[rgba(127,183,201,0.3)] px-1.5 py-[1px] text-[8px] font-bold tracking-[0.22em] text-[#7fb7c9]">{a.slot}</span>
+                  <span className={`px-2 py-[2px] text-[9px] font-bold tracking-[0.22em] ${equipped ? 'bg-[#ffab3d] text-[#10131a]' : 'border border-[rgba(127,183,201,0.4)] text-[#7fb7c9]'}`}>
+                    {equipped ? 'FITTED' : conflict ? 'SLOT USED' : 'EQUIP'}
+                  </span>
+                </span>
+              </div>
+              <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[10px] font-semibold tracking-[0.1em]">
+                <span className="text-[#63e6b0]">▲ {a.good}</span>
+                <span className="text-[#ff8a70]">▼ {a.bad}</span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="flex w-full max-w-4xl flex-col gap-4 lg:flex-row">
+      {col('p', 'KODIAK .45', 'SIDEARM')}
+      {col('s', 'PTARMIGAN M9', 'PRIMARY')}
+    </div>
+  );
+}
 function fmtTime(s: number) {
   const m = Math.floor(s / 60);
   const ss = Math.floor(s % 60);
   return `${m}:${ss.toString().padStart(2, '0')}`;
+}
+
+/* ---------- procedural briefing backdrop: the depot at night, no assets required ---------- */
+function BriefingBackdrop() {
+  const ribs = Array.from({ length: 40 }, (_, i) => 40 + i * 40);
+  return (
+    <div className="fx-kenburns absolute inset-0">
+      <svg className="h-full w-full" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" aria-hidden>
+        <defs>
+          <linearGradient id="bbSky" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#04080d" />
+            <stop offset="1" stopColor="#0b1622" />
+          </linearGradient>
+          <linearGradient id="bbMoon" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#0e1d2e" />
+            <stop offset="0.55" stopColor="#27425c" />
+            <stop offset="1" stopColor="#a9c6de" />
+          </linearGradient>
+          <linearGradient id="bbFloor" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#131c24" />
+            <stop offset="1" stopColor="#070c11" />
+          </linearGradient>
+          <linearGradient id="bbCone" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#ffc46e" stopOpacity="0.5" />
+            <stop offset="1" stopColor="#ff9d2e" stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id="bbShaft" x1="1" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#9fb9d4" stopOpacity="0.32" />
+            <stop offset="1" stopColor="#9fb9d4" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+
+        {/* back wall + corrugation */}
+        <rect width="1600" height="640" fill="#0d151d" />
+        <rect width="1600" height="640" fill="url(#bbSky)" opacity="0.55" />
+        {ribs.map((x) => (
+          <rect key={x} x={x} y="0" width="3" height="640" fill="#1a2733" opacity="0.6" />
+        ))}
+        <rect y="205" width="1600" height="3" fill="#1a2733" opacity="0.8" />
+        <rect y="430" width="1600" height="3" fill="#1a2733" opacity="0.8" />
+
+        {/* the breach — torn steel opening onto the moonlit yard */}
+        <polygon points="1150,262 1204,238 1262,258 1330,236 1408,254 1462,300 1470,388 1452,470 1466,548 1388,584 1300,566 1222,588 1160,540 1138,436 1156,340" fill="url(#bbMoon)" />
+        {/* chain-link fence + flood tower through the hole */}
+        {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
+          <rect key={i} x={1170 + i * 38} y="392" width="3" height="160" fill="#0a141d" />
+        ))}
+        <rect x="1160" y="418" width="306" height="4" fill="#0a141d" />
+        <rect x="1160" y="492" width="306" height="4" fill="#0a141d" />
+        <rect x="1400" y="300" width="7" height="250" fill="#08111a" />
+        <rect x="1382" y="296" width="44" height="12" fill="#08111a" />
+        <circle cx="1382" cy="302" r="5" fill="#d7e6f2" opacity="0.9" />
+        {/* snowfield through the breach */}
+        <polygon points="1138,556 1470,548 1466,584 1160,590" fill="#33465a" opacity="0.55" />
+        {/* jagged torn edges */}
+        <polygon points="1150,262 1204,238 1262,258 1330,236 1408,254 1462,300 1452,292 1398,246 1324,228 1256,250 1198,230 1142,254" fill="#05090e" />
+
+        {/* moonlight shaft across the floor */}
+        <polygon points="1150,300 1462,320 1240,900 780,900" fill="url(#bbShaft)" />
+
+        {/* floor */}
+        <polygon points="0,640 1600,640 1600,900 0,900" fill="url(#bbFloor)" />
+        <polygon points="0,640 1600,640 1600,648 0,648" fill="#1c2936" opacity="0.7" />
+
+        {/* crate stacks + barrels, left flank */}
+        <g fill="#141e27">
+          <rect x="70" y="500" width="150" height="140" />
+          <rect x="86" y="372" width="122" height="128" transform="rotate(-2 147 436)" />
+          <rect x="252" y="540" width="128" height="100" />
+        </g>
+        <g fill="#1b2833">
+          <rect x="70" y="500" width="150" height="8" />
+          <rect x="86" y="372" width="122" height="8" />
+        </g>
+        <g fill="#111a22">
+          <rect x="430" y="546" width="64" height="94" rx="6" />
+          <rect x="506" y="546" width="64" height="94" rx="6" />
+          <ellipse cx="462" cy="546" rx="32" ry="9" fill="#1d2b37" />
+          <ellipse cx="538" cy="546" rx="32" ry="9" fill="#1d2b37" />
+        </g>
+
+        {/* wrecked truck silhouette, right of center */}
+        <g fill="#0e161e">
+          <rect x="880" y="512" width="270" height="118" />
+          <rect x="1090" y="462" width="104" height="70" />
+          <circle cx="930" cy="640" r="30" fill="#080d12" />
+          <circle cx="1100" cy="640" r="30" fill="#080d12" />
+        </g>
+
+        {/* hanging tungsten lamps */}
+        {[{ x: 560, f: 'fx-flicker' }, { x: 1010, f: 'fx-flicker2' }].map((l) => (
+          <g key={l.x} className={l.f}>
+            <rect x={l.x - 1} y="0" width="2" height="180" fill="#0a0f14" />
+            <rect x={l.x - 16} y="176" width="32" height="12" fill="#241a10" />
+            <polygon points={`${l.x - 130},640 ${l.x + 130},640 ${l.x + 26},188 ${l.x - 26},188`} fill="url(#bbCone)" />
+            <ellipse cx={l.x} cy="642" rx="150" ry="26" fill="#ffab3d" opacity="0.13" />
+            <circle cx={l.x} cy="188" r="6" fill="#ffd9a0" />
+          </g>
+        ))}
+
+        <rect width="1600" height="130" fill="#04080d" opacity="0.7" />
+      </svg>
+      <div className="fx-snowdrift absolute inset-0 opacity-70" />
+    </div>
+  );
 }
 
 /* ============================== APP ============================== */
@@ -97,9 +286,33 @@ export default function App() {
   const [dmgId, setDmgId] = useState(0);
   const [banner, setBanner] = useState<Banner | null>(null);
   const [toast, setToast] = useState<{ id: number; text: string } | null>(null);
+  const [pops, setPops] = useState<ScorePop[]>([]);
+  const popSeq = useRef(0);
   const [stats, setStats] = useState<EndStats | null>(null);
-  const [showSettings, setShowSettings] = useState(false);
+  const [menuView, setMenuView] = useState<'root' | 'manual' | 'settings' | 'loadout'>('root');
+  const [manualSec, setManualSec] = useState('brief');
   const [crosshairOn, setCrosshairOn] = useState<boolean>(loadXhair);
+  const [sens, setSens] = useState<number>(loadSens);
+  const [loadout, setLoadout] = useState<{ p: string[]; s: string[] }>(loadLoadout);
+  const [showLoadout, setShowLoadout] = useState(false);
+
+  const toggleAtt = useCallback((wk: 'p' | 's', id: string) => {
+    setLoadout((prev) => {
+      const list = prev[wk];
+      let next: string[];
+      if (list.includes(id)) {
+        next = list.filter((x) => x !== id);
+      } else {
+        const slot = ATTACHMENTS.find((a) => a.id === id)?.slot;
+        next = [...list.filter((x) => ATTACHMENTS.find((a) => a.id === x)?.slot !== slot), id];
+      }
+      const merged = { ...prev, [wk]: next };
+      try { localStorage.setItem('wp_loadout', JSON.stringify(merged)); } catch { /* ignore */ }
+      engineRef.current?.applyLoadout([...merged.p.map((x) => `p:${x}`), ...merged.s.map((x) => `s:${x}`)]);
+      sfx.ui();
+      return merged;
+    });
+  }, []);
   const toggleCrosshair = useCallback(() => {
     setCrosshairOn((v) => {
       const n = !v;
@@ -132,6 +345,15 @@ export default function App() {
       case 'pickup':
         setToast({ id: Date.now(), text: e.text });
         break;
+      case 'streak':
+        setBanner({ id: Date.now(), title: e.label, sub: `×${e.n} SCORE CHAIN`, tone: 'good' });
+        break;
+      case 'scorepop': {
+        const id = ++popSeq.current;
+        setPops((ps) => [...ps.slice(-7), { id, text: e.text, x: e.x, y: e.y, head: e.head }]);
+        setTimeout(() => setPops((ps) => ps.filter((p) => p.id !== id)), 950);
+        break;
+      }
       case 'gameover':
         setStats(e.stats);
         break;
@@ -143,6 +365,9 @@ export default function App() {
     const engine = new Engine(canvasRef.current, { hud: setHud, event: onEvent });
     engineRef.current = engine;
     engine.boot();
+    engine.setSensitivity(loadSens());
+    const lo = loadLoadout();
+    engine.applyLoadout([...lo.p.map((x) => `p:${x}`), ...lo.s.map((x) => `s:${x}`)]);
     return () => {
       engine.dispose();
       engineRef.current = null;
@@ -156,11 +381,15 @@ export default function App() {
   const w = hud.weapons[hud.weaponIndex];
   const playing = hud.phase === 'playing' || hud.phase === 'paused';
   const healthPct = hud.health / 100;
-  const healthColor = healthPct > 0.5 ? '#bfeaf5' : healthPct > 0.25 ? '#ffab3d' : '#ff3b30';
+  const healthColor = hud.regen ? '#63e6b0' : healthPct > 0.5 ? '#bfeaf5' : healthPct > 0.25 ? '#ffab3d' : '#ff3b30';
 
   return (
     <div className="fixed inset-0 overflow-hidden bg-[#05090d] select-none">
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full cursor-none" />
+
+      {/* cold cinematic grade + film grain — always on for grit */}
+      <div className="fx-cold pointer-events-none absolute inset-0" />
+      <div className="fx-grain pointer-events-none absolute inset-0" />
 
       {/* ======================= IN-GAME HUD ======================= */}
       {playing && (
@@ -205,6 +434,30 @@ export default function App() {
             </div>
           )}
 
+          {/* kill chain */}
+          {hud.streak >= 2 && (
+            <div key={hud.streak} className="fx-streak absolute left-1/2 top-[33%] -translate-x-1/2 text-center">
+              <span className="font-display text-4xl text-[#ffab3d]" style={{ textShadow: '0 0 20px rgba(255,157,46,0.55), 0 2px 0 rgba(0,0,0,0.7)' }}>
+                ×{hud.streak}
+              </span>
+              <span className="ml-2 align-middle text-[10px] font-bold tracking-[0.4em] text-[#ff7a45]">CHAIN</span>
+              <div className="mx-auto mt-1 h-[3px] w-28 bg-[rgba(255,157,46,0.18)]">
+                <div className="h-full bg-[#ffab3d]" style={{ width: `${Math.round(hud.streakT * 100)}%` }} />
+              </div>
+            </div>
+          )}
+
+          {/* floating score pops */}
+          {pops.map((p) => (
+            <div
+              key={p.id}
+              className={`fx-pop font-display pointer-events-none absolute text-xl ${p.head ? 'text-[#ff5c33]' : 'text-[#ffc46e]'}`}
+              style={{ left: `${Math.round(p.x * 100)}%`, top: `${Math.round(p.y * 100)}%`, textShadow: '0 1px 0 rgba(0,0,0,0.8)' }}
+            >
+              {p.text}
+            </div>
+          ))}
+
           {/* pickup toast */}
           {toast && (
             <div key={toast.id} className="fx-toast absolute left-1/2 top-[62%] -translate-x-1/2 font-display text-sm tracking-[0.25em] text-[#bfeaf5]" style={{ textShadow: '0 0 12px rgba(0,0,0,0.9)' }}>
@@ -247,9 +500,17 @@ export default function App() {
           {/* bottom-left: vitals */}
           <div className="hud-plate absolute bottom-5 left-5 px-5 py-3">
             <div className="flex items-end justify-between gap-8">
-              <div className="text-[10px] font-bold tracking-[0.3em] text-[#7fb7c9]">VITALS</div>
+              <div className="flex items-center gap-2">
+                <div className="text-[10px] font-bold tracking-[0.3em] text-[#7fb7c9]">VITALS</div>
+                {hud.regen && (
+                  <span className="fx-blink border border-[rgba(99,230,176,0.5)] bg-[rgba(99,230,176,0.12)] px-1.5 py-[1px] text-[9px] font-bold tracking-[0.22em] text-[#63e6b0]">
+                    RESTORING
+                  </span>
+                )}
+              </div>
               <div className="font-display text-2xl leading-none" style={{ color: healthColor }}>
                 {hud.health}
+                {hud.regen && <span className="ml-1 align-top text-sm text-[#63e6b0]">+</span>}
               </div>
             </div>
             <div className="mt-1.5 flex gap-[3px]">
@@ -272,10 +533,22 @@ export default function App() {
             <div className="flex items-center justify-end gap-2">
               <span className="text-[#ffab3d]"><IconBullet /></span>
               <span className="font-display text-lg leading-none text-[#bfeaf5]">{w.name}</span>
-              <span className="ml-1 border border-[rgba(127,183,201,0.35)] px-1.5 py-0.5 text-[9px] font-bold tracking-[0.25em] text-[#7fb7c9]">
-                {w.auto ? 'FULL-AUTO' : 'SEMI-AUTO'}
+              <span className={`ml-1 border px-1.5 py-0.5 text-[9px] font-bold tracking-[0.25em] ${w.mode === 'BURST' ? 'border-[#ffab3d] text-[#ffab3d]' : 'border-[rgba(127,183,201,0.35)] text-[#7fb7c9]'}`}>
+                {w.auto ? `${w.mode} · V` : w.mode}
               </span>
             </div>
+            {w.atts.length > 0 && (
+              <div className="mt-1 flex justify-end gap-1">
+                {w.atts.map((a) => {
+                  const def = ATTACHMENTS.find((x) => x.id === a);
+                  return (
+                    <span key={a} title={def?.name} className="border border-[rgba(255,171,61,0.4)] bg-[rgba(255,171,61,0.08)] px-1.5 py-[1px] text-[8px] font-bold tracking-[0.18em] text-[#ffab3d]">
+                      {def ? def.slot : a.toUpperCase()}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
             <div className="mt-0.5 flex items-end justify-end gap-2">
               <span className={`font-display text-5xl leading-none ${w.mag === 0 ? 'fx-blink text-[#ff3b30]' : w.mag <= Math.ceil(WEAPON_MAGS[hud.weaponIndex] * 0.25) ? 'text-[#ffab3d]' : 'text-[#bfeaf5]'}`}>
                 {w.mag.toString().padStart(2, '0')}
@@ -297,7 +570,7 @@ export default function App() {
           {/* control hints during wave 1 */}
           {hud.wave <= 1 && hud.phase === 'playing' && (
             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-[11px] font-semibold tracking-[0.24em] text-[rgba(191,234,245,0.5)]">
-              R RELOAD&ensp;•&ensp;1/2 WEAPONS&ensp;•&ensp;RMB AIM&ensp;•&ensp;SHIFT SPRINT&ensp;•&ensp;SPACE JUMP
+              R RELOAD&ensp;•&ensp;V FIRE MODE&ensp;•&ensp;F MELEE&ensp;•&ensp;1/2 WEAPONS&ensp;•&ensp;RMB AIM&ensp;•&ensp;SHIFT SPRINT&ensp;•&ensp;5S CLEAR = VITALS RESTORE
             </div>
           )}
         </div>
@@ -305,128 +578,271 @@ export default function App() {
 
       {/* ======================= MENU ======================= */}
       {hud.phase === 'menu' && (
-        <div className="absolute inset-0 overflow-y-auto">
-          <div className="fx-kenburns absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url(${MENU_BG})` }} />
+        <div className="absolute inset-0 overflow-hidden">
+          <BriefingBackdrop />
           <div className="absolute inset-0 bg-[linear-gradient(100deg,rgba(4,9,13,0.94)_18%,rgba(4,9,13,0.72)_48%,rgba(4,9,13,0.45)_100%)]" />
           <div className="fx-vignette absolute inset-0" />
 
-          <div className="relative mx-auto flex min-h-full max-w-6xl flex-col justify-center gap-10 px-8 py-10 lg:flex-row lg:items-center lg:gap-16">
-            {/* left: briefing */}
-            <div className="fx-rise max-w-xl">
-              <div className="mb-3 flex items-center gap-3 text-[11px] font-bold tracking-[0.4em] text-[#ff5c33]">
-                <span className="inline-block h-[8px] w-[8px] animate-pulse bg-[#ff5c33]" />
-                LIVE FIRE AUTHORIZED — 64.83°N 147.71°W
-              </div>
-              <h1 className="font-display leading-[0.9]">
-                <span className="block text-6xl text-[#bfeaf5] md:text-7xl" style={{ textShadow: '0 0 34px rgba(140,210,235,0.35)' }}>WHITEOUT</span>
-                <span className="block text-4xl text-[#ffab3d] md:text-5xl">PROTOCOL<span className="text-[#bfeaf5]">_</span></span>
-              </h1>
-              <p className="mt-5 max-w-md text-[15px] font-medium leading-relaxed text-[#9cc3d2]">
-                Prudhoe Supply Depot, Alaska. The convoy never made it. A mercenary company has taken the warehouse
-                district and they are coming through the storm in <span className="font-bold text-[#bfeaf5]">endless waves</span>.
-                Hold the depot. Crate stacks, barriers and columns stop bullets — <span className="font-bold text-[#ffab3d]">use the cover</span>,
-                aim for the red visors, and make every round count.
-              </p>
-
-              {/* controls */}
-              <div className="hud-plate mt-6 grid max-w-md grid-cols-2 gap-x-6 gap-y-1.5 px-5 py-4 text-[12px] font-semibold tracking-[0.12em] text-[#9cc3d2]">
-                {[
-                  ['W A S D', 'MOVE'], ['MOUSE', 'AIM — CURSOR LOCKS'],
-                  ['LMB', 'FIRE'], ['RMB', 'AIM DOWN SIGHTS'],
-                  ['R', 'RELOAD'], ['1 / 2 / WHEEL', 'SWAP WEAPON'],
-                  ['SHIFT', 'SPRINT'], ['SPACE', 'JUMP'], ['ESC', 'PAUSE'],
-                ].map(([k, v]) => (
-                  <div key={k} className="flex items-baseline justify-between gap-3 border-b border-[rgba(127,183,201,0.12)] py-1">
-                    <span className="font-display text-[11px] text-[#ffab3d]">{k}</span>
-                    <span>{v}</span>
+          {/* ---------- ROOT: minimal start ---------- */}
+          {menuView === 'root' && (
+            <div className="fx-rise relative flex h-full flex-col justify-between px-8 py-7 md:px-14 md:py-9">
+              <div className="flex items-start justify-between">
+                <div>
+                  <div className="flex items-center gap-3 text-[11px] font-bold tracking-[0.4em] text-[#ff5c33]">
+                    <span className="inline-block h-[8px] w-[8px] animate-pulse bg-[#ff5c33]" />
+                    LIVE FIRE AUTHORIZED — 64.83°N 147.71°W
                   </div>
-                ))}
+                  <div className="mt-2 h-[3px] w-16 bg-[#ffab3d]" />
+                </div>
+                <div className="text-right text-[9px] font-bold leading-relaxed tracking-[0.3em] text-[rgba(127,183,201,0.6)]">
+                  ARCTIC OPS COMMAND<br />BUILD 2.6 // SECTOR 7
+                </div>
               </div>
 
-              <div className="relative mt-7 flex items-center gap-5">
-                <button className="btn-mil text-lg" onClick={() => { setShowSettings(false); start(); }}>DEPLOY ▸</button>
-                <button
-                  className="btn-ghost flex items-center gap-2 text-xs"
-                  style={showSettings ? { borderColor: '#ffab3d', color: '#ffab3d' } : undefined}
-                  onClick={() => setShowSettings((s) => !s)}
-                >
-                  <IconGear /> SETTINGS
-                </button>
-                <span className="text-[11px] font-semibold tracking-[0.22em] text-[#7fb7c9]">MOUSE + KEYBOARD REQUIRED</span>
+              <div className="max-w-2xl">
+                <h1 className="font-display leading-[0.9]">
+                  <span className="block text-7xl text-[#bfeaf5] md:text-8xl" style={{ textShadow: '0 0 44px rgba(120,190,220,0.3)' }}>WHITEOUT</span>
+                  <span className="block text-5xl text-[#ffab3d] md:text-6xl">PROTOCOL<span className="fx-blink text-[#bfeaf5]">_</span></span>
+                </h1>
+                <p className="mt-5 text-[13px] font-semibold tracking-[0.34em] text-[#7fb7c9]">
+                  HOLD THE DEPOT. OUTLAST THE STORM.
+                </p>
 
-                {showSettings && (
-                  <div className="fx-rise hud-plate absolute left-0 top-[calc(100%+12px)] z-20 w-80 px-5 py-4">
-                    <div className="flex items-baseline justify-between">
-                      <span className="font-display text-sm text-[#bfeaf5]">FIELD SETTINGS</span>
-                      <span className="text-[9px] font-bold tracking-[0.3em] text-[#7fb7c9]">SAVED LOCALLY</span>
-                    </div>
-                    <div className="mt-1 border-t border-[rgba(127,183,201,0.15)]">
-                      <SettingToggle label="CROSSHAIR" desc="ON-SCREEN RETICLE OVERLAY" value={crosshairOn} onToggle={toggleCrosshair} />
-                    </div>
-                    <div className="mt-1 border-t border-[rgba(127,183,201,0.15)] pt-2 text-[10px] font-semibold tracking-[0.16em] text-[#7fb7c9]">
-                      <span className="text-[#ff5c33]">TIP //</span> NO RETICLE? SHORT BURSTS, TRUST THE TRACERS.
-                    </div>
-                  </div>
-                )}
+                <div className="mt-10 flex flex-wrap items-center gap-4">
+                  <button className="btn-mil px-14 py-4 text-xl" onClick={start}>DEPLOY ▸</button>
+                  <button className="btn-ghost flex items-center gap-2 text-xs" onClick={() => setMenuView('manual')}>
+                    FIELD MANUAL
+                  </button>
+                  <button className="btn-ghost flex items-center gap-2 text-xs" onClick={() => setMenuView('loadout')}>
+                    LOADOUT
+                  </button>
+                  <button className="btn-ghost flex items-center gap-2 text-xs" onClick={() => setMenuView('settings')}>
+                    <IconGear /> SETTINGS
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-end justify-between text-[9px] font-bold tracking-[0.28em] text-[rgba(127,183,201,0.55)]">
+                <span>MOUSE + KEYBOARD REQUIRED — CURSOR LOCKS ON DEPLOY</span>
+                <span>-34°C // WIND 40KN // VIS 200M</span>
               </div>
             </div>
+          )}
 
-            {/* right: armory */}
-            <div className="fx-rise w-full max-w-sm" style={{ animationDelay: '0.12s' }}>
-              <div className="hud-plate hud-plate-r px-6 py-5">
-                <div className="flex items-baseline justify-between">
-                  <h2 className="font-display text-xl text-[#bfeaf5]">ARMORY</h2>
-                  <span className="text-[10px] font-bold tracking-[0.3em] text-[#7fb7c9]">ISSUED ON SITE</span>
+          {/* ---------- FIELD MANUAL: all intel in one dedicated dossier ---------- */}
+          {menuView === 'manual' && (
+            <div className="fx-rise absolute inset-0 flex flex-col bg-[rgba(3,8,12,0.93)]">
+              <div className="flex items-center justify-between border-b border-[rgba(127,183,201,0.18)] px-8 py-4 md:px-14">
+                <div>
+                  <div className="text-[10px] font-bold tracking-[0.4em] text-[#7fb7c9]">OPERATION WHITEOUT</div>
+                  <h2 className="font-display text-3xl text-[#bfeaf5]">FIELD MANUAL</h2>
+                </div>
+                <button className="btn-ghost text-xs" onClick={() => setMenuView('root')}>◂ BACK</button>
+              </div>
+
+              <div className="flex min-h-0 flex-1">
+                {/* rail */}
+                <div className="hidden w-52 shrink-0 flex-col gap-1 border-r border-[rgba(127,183,201,0.14)] px-6 py-6 md:flex">
+                  {([['brief', '01', 'SITUATION'], ['controls', '02', 'CONTROLS'], ['armory', '03', 'ARMORY'], ['threats', '04', 'THREAT INTEL']] as [string, string, string][]).map(([id, num, label]) => (
+                    <button
+                      key={id}
+                      onClick={() => {
+                        setManualSec(id);
+                        document.getElementById(`fm-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }}
+                      className={`flex items-baseline gap-3 px-3 py-2 text-left text-[12px] font-bold tracking-[0.22em] transition-colors ${manualSec === id ? 'bg-[rgba(255,171,61,0.12)] text-[#ffab3d]' : 'text-[#7fb7c9] hover:bg-[rgba(127,183,201,0.08)] hover:text-[#bfeaf5]'}`}
+                    >
+                      <span className="font-display text-[11px]">{num}</span>
+                      {label}
+                    </button>
+                  ))}
                 </div>
 
-                {ARMORY.map((a) => (
-                  <div key={a.name} className="mt-5 border-t border-[rgba(127,183,201,0.15)] pt-4 first-of-type:border-t-0">
-                    <div className="flex items-baseline justify-between">
-                      <span className="font-display text-lg text-[#ffab3d]">{a.name}</span>
-                      <span className="text-[10px] font-bold tracking-[0.25em] text-[#7fb7c9]">{a.mode}</span>
+                {/* dossier */}
+                <div className="min-w-0 flex-1 overflow-y-auto px-8 py-6 md:px-12">
+                  <section id="fm-brief" className="max-w-2xl scroll-mt-4">
+                    <div className="text-[10px] font-bold tracking-[0.4em] text-[#ffab3d]">01 // SITUATION</div>
+                    <p className="mt-3 text-[15px] font-medium leading-relaxed text-[#9cc3d2]">
+                      Prudhoe Supply Depot, Alaska. The convoy never made it. A mercenary company has taken the warehouse
+                      district and they are coming through the storm in <span className="font-bold text-[#bfeaf5]">endless waves</span>.
+                      The fight spills into the <span className="font-bold text-[#bfeaf5]">fenced snow yard</span> through the gates.
+                      Crate stacks, barriers and columns stop bullets — <span className="font-bold text-[#ffab3d]">use the cover</span>,
+                      aim for the red visors, and make every round count. Hostiles now route around the depot with
+                      <span className="font-bold text-[#bfeaf5]"> real pathfinding</span> — they will flank, not stall.
+                    </p>
+                    <div className="mt-4 border-l-2 border-[#ff5c33] pl-4 text-[12px] font-semibold tracking-[0.14em] text-[#7fb7c9]">
+                      WAVES SCALE IN NUMBER AND ARMOR. HEADSHOTS PAY +75. SUPPLY CRATES DROP FROM HOSTILES. 5S CLEAR = VITALS RESTORE.
                     </div>
-                    <p className="mt-0.5 text-[12px] font-medium text-[#7fb7c9]">{a.desc}</p>
-                    <div className="mt-2.5 space-y-1.5">
-                      {a.stats.map(([label, v, amber]) => (
-                        <div key={label} className="flex items-center gap-3">
-                          <span className="w-9 text-[10px] font-bold tracking-[0.2em] text-[#7fb7c9]">{label}</span>
-                          <div className={`stat-bar flex-1 ${amber ? 'amber' : ''}`}><i style={{ width: `${v}%` }} /></div>
+                  </section>
+
+                  <section id="fm-controls" className="mt-10 max-w-2xl scroll-mt-4">
+                    <div className="text-[10px] font-bold tracking-[0.4em] text-[#ffab3d]">02 // CONTROLS</div>
+                    <div className="hud-plate mt-4 grid grid-cols-1 gap-x-8 gap-y-1.5 px-5 py-4 text-[12px] font-semibold tracking-[0.12em] text-[#9cc3d2] sm:grid-cols-2">
+                      {([['W A S D', 'MOVE'], ['MOUSE', 'AIM — CURSOR LOCKS'], ['LMB', 'FIRE'], ['RMB', 'AIM DOWN SIGHTS'], ['R', 'RELOAD'], ['1 / 2 / WHEEL', 'SWAP WEAPON'], ['V', 'FIRE MODE — AUTO/BURST'], ['F', 'MELEE STOCK-STRIKE'], ['SHIFT', 'SPRINT'], ['SPACE', 'JUMP'], ['ESC', 'PAUSE'], ['5S CLEAR', 'VITALS RESTORE']] as [string, string][]).map(([k, v]) => (
+                        <div key={k} className="flex items-baseline justify-between gap-3 border-b border-[rgba(127,183,201,0.12)] py-1.5">
+                          <span className="font-display text-[11px] text-[#ffab3d]">{k}</span>
+                          <span>{v}</span>
                         </div>
                       ))}
                     </div>
-                  </div>
-                ))}
+                  </section>
 
-                <div className="mt-5 border-t border-[rgba(127,183,201,0.15)] pt-3 text-[11px] font-semibold tracking-[0.18em] text-[#7fb7c9]">
-                  <span className="text-[#ff5c33]">INTEL //</span> WAVES SCALE IN NUMBER AND ARMOR.
-                  HEADSHOTS PAY +75. SUPPLY CRATES DROP FROM HOSTILES.
+                  <section id="fm-armory" className="mt-10 max-w-2xl scroll-mt-4">
+                    <div className="text-[10px] font-bold tracking-[0.4em] text-[#ffab3d]">03 // ARMORY</div>
+                    {ARMORY.map((a) => (
+                      <div key={a.name} className="hud-plate mt-4 px-5 py-4">
+                        <div className="flex items-baseline justify-between">
+                          <span className="font-display text-lg text-[#ffab3d]">{a.name}</span>
+                          <span className="text-[10px] font-bold tracking-[0.25em] text-[#7fb7c9]">{a.mode}</span>
+                        </div>
+                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                          {a.spec.map((s) => (
+                            <span key={s} className="border border-[rgba(127,183,201,0.28)] px-1.5 py-[2px] text-[9px] font-bold tracking-[0.16em] text-[#9cc3d2]">{s}</span>
+                          ))}
+                        </div>
+                        <p className="mt-1.5 text-[12px] font-medium text-[#7fb7c9]">{a.desc}</p>
+                        <div className="mt-2 flex items-center gap-2 text-[9px] font-bold tracking-[0.18em]">
+                          <span className="text-[#ff5c33]">RECOIL</span>
+                          <span className="h-px flex-1 bg-[rgba(127,183,201,0.18)]" />
+                          <span className="text-[#bfeaf5]">{a.recoil}</span>
+                        </div>
+                        <div className="mt-2.5 space-y-1.5">
+                          {a.stats.map(([label, v, amber]) => (
+                            <div key={label} className="flex items-center gap-3">
+                              <span className="w-9 text-[10px] font-bold tracking-[0.2em] text-[#7fb7c9]">{label}</span>
+                              <div className={`stat-bar flex-1 ${amber ? 'amber' : ''}`}><i style={{ width: `${v}%` }} /></div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </section>
+
+                  <section id="fm-threats" className="mt-10 max-w-2xl scroll-mt-4 pb-10">
+                    <div className="text-[10px] font-bold tracking-[0.4em] text-[#ffab3d]">04 // THREAT INTEL — READ THE SHOULDER LAMP</div>
+                    <div className="hud-plate mt-4 space-y-3 px-5 py-4 text-[12px] font-medium leading-snug text-[#9cc3d2]">
+                      <div className="flex items-center gap-2.5">
+                        <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#3a4750]" />
+                        <span><span className="font-bold text-[#bfeaf5]">RIFLEMAN</span> — standard. Holds mid-range, fires bursts.</span>
+                      </div>
+                      <div className="flex items-center gap-2.5">
+                        <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#ff8b2a] shadow-[0_0_8px_#ff8b2a]" />
+                        <span><span className="font-bold text-[#ffab3d]">BREACHER</span> — shotgun. Sprints in close, hits hard. Keep distance or burst it down.</span>
+                      </div>
+                      <div className="flex items-center gap-2.5">
+                        <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#55d7ff] shadow-[0_0_8px_#55d7ff]" />
+                        <span><span className="font-bold text-[#bfeaf5]">MARKSMAN</span> — precise long-range crack. Punishes you in the open. Close the gap.</span>
+                      </div>
+                    </div>
+                  </section>
                 </div>
               </div>
             </div>
-          </div>
+          )}
+
+          {/* ---------- SETTINGS ---------- */}
+          {menuView === 'settings' && (
+            <div className="fx-rise absolute inset-0 flex items-center justify-center bg-[rgba(3,8,12,0.9)] px-6">
+              <div className="hud-plate w-full max-w-md px-7 py-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-[10px] font-bold tracking-[0.4em] text-[#7fb7c9]">SYSTEMS</div>
+                    <h2 className="font-display text-3xl text-[#bfeaf5]">SETTINGS</h2>
+                  </div>
+                  <button className="btn-ghost text-xs" onClick={() => setMenuView('root')}>◂ BACK</button>
+                </div>
+
+                <div className="mt-3 border-t border-[rgba(127,183,201,0.15)]">
+                  <SettingToggle label="CROSSHAIR" desc="ON-SCREEN RETICLE OVERLAY" value={crosshairOn} onToggle={toggleCrosshair} />
+                </div>
+
+                <div className="mt-2 border-t border-[rgba(127,183,201,0.15)] pt-4">
+                  <div className="flex items-baseline justify-between">
+                    <div>
+                      <div className="text-[12px] font-bold tracking-[0.22em] text-[#bfeaf5]">MOUSE SENSITIVITY</div>
+                      <div className="text-[10px] font-medium tracking-[0.14em] text-[#7fb7c9]">AIM SPEED MULTIPLIER</div>
+                    </div>
+                    <span className="font-display text-lg text-[#ffab3d]">{sens.toFixed(2)}×</span>
+                  </div>
+                  <input
+                    type="range"
+                    className="sens mt-3"
+                    min={0.3}
+                    max={2.5}
+                    step={0.05}
+                    value={sens}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      setSens(v);
+                      try { localStorage.setItem('wp_sens', String(v)); } catch { /* ignore */ }
+                      engineRef.current?.setSensitivity(v);
+                    }}
+                  />
+                  <div className="mt-1 flex justify-between text-[9px] font-bold tracking-[0.2em] text-[#7fb7c9]">
+                    <span>STEADY 0.3×</span><span>DEFAULT 1.0×</span><span>QUICK 2.5×</span>
+                  </div>
+                </div>
+
+                <div className="mt-4 border-t border-[rgba(127,183,201,0.15)] pt-3 text-[10px] font-semibold tracking-[0.16em] text-[#7fb7c9]">
+                  <span className="text-[#ff5c33]">TIP //</span> SETTINGS SAVE LOCALLY AND APPLY MID-OPERATION.
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ---------- LOADOUT: fit attachments, one per slot per weapon ---------- */}
+          {menuView === 'loadout' && (
+            <div className="fx-rise absolute inset-0 flex flex-col bg-[rgba(3,8,12,0.93)]">
+              <div className="flex items-center justify-between border-b border-[rgba(127,183,201,0.18)] px-8 py-4 md:px-14">
+                <div>
+                  <div className="text-[10px] font-bold tracking-[0.4em] text-[#7fb7c9]">OPERATION WHITEOUT</div>
+                  <h2 className="font-display text-3xl text-[#bfeaf5]">WEAPON LOADOUT</h2>
+                </div>
+                <button className="btn-ghost text-xs" onClick={() => setMenuView('root')}>◂ BACK</button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto px-8 py-8 md:px-14">
+                <div className="mb-5 max-w-4xl text-[11px] font-semibold tracking-[0.18em] text-[#7fb7c9]">
+                  <span className="text-[#ff5c33]">ARMORY RULES //</span> ONE PART PER SLOT PER WEAPON. EVERY MOD CARRIES A COST — FITTING APPLIES IMMEDIATELY.
+                </div>
+                <LoadoutPanel loadout={loadout} onToggle={toggleAtt} />
+              </div>
+            </div>
+          )}
+
         </div>
       )}
 
       {/* ======================= PAUSE ======================= */}
       {hud.phase === 'paused' && (
         <div className="pointer-events-auto absolute inset-0 flex items-center justify-center bg-[rgba(3,7,10,0.78)]">
-          <div className="fx-rise hud-plate px-12 py-10 text-center">
-            <div className="text-[11px] font-bold tracking-[0.4em] text-[#7fb7c9]">OPERATION SUSPENDED</div>
-            <h2 className="font-display mt-1 text-5xl text-[#bfeaf5]">STAND BY</h2>
-            <div className="mx-auto mt-3 h-[3px] w-16 bg-[#ffab3d]" />
-            <p className="mt-3 text-sm font-semibold tracking-[0.14em] text-[#7fb7c9]">CURSOR RELEASED — THE STORM HOLDS ITS BREATH</p>
+          {!showLoadout ? (
+            <div className="fx-rise hud-plate px-12 py-10 text-center">
+              <div className="text-[11px] font-bold tracking-[0.4em] text-[#7fb7c9]">OPERATION SUSPENDED</div>
+              <h2 className="font-display mt-1 text-5xl text-[#bfeaf5]">STAND BY</h2>
+              <div className="mx-auto mt-3 h-[3px] w-16 bg-[#ffab3d]" />
+              <p className="mt-3 text-sm font-semibold tracking-[0.14em] text-[#7fb7c9]">CURSOR RELEASED — THE STORM HOLDS ITS BREATH</p>
 
-            <div className="mx-auto mt-6 w-72 border-t border-[rgba(127,183,201,0.18)] px-2 pt-3">
-              <div className="text-left text-[9px] font-bold tracking-[0.32em] text-[#7fb7c9]">FIELD SETTINGS</div>
-              <SettingToggle label="CROSSHAIR" desc="ON-SCREEN RETICLE OVERLAY" value={crosshairOn} onToggle={toggleCrosshair} />
-            </div>
+              <div className="mx-auto mt-6 w-72 border-t border-[rgba(127,183,201,0.18)] px-2 pt-3">
+                <div className="text-left text-[9px] font-bold tracking-[0.32em] text-[#7fb7c9]">FIELD SETTINGS</div>
+                <SettingToggle label="CROSSHAIR" desc="ON-SCREEN RETICLE OVERLAY" value={crosshairOn} onToggle={toggleCrosshair} />
+              </div>
 
-            <div className="mt-5 flex flex-col items-center gap-3">
-              <button className="btn-mil w-64" onClick={resume}>RESUME ▸</button>
-              <button className="btn-ghost w-64" onClick={start}>RESTART OPERATION</button>
-              <button className="btn-ghost w-64" onClick={toMenu}>ABANDON — MAIN MENU</button>
+              <div className="mt-5 flex flex-col items-center gap-3">
+                <button className="btn-mil w-64" onClick={() => { setShowLoadout(false); resume(); }}>RESUME ▸</button>
+                <button className="btn-ghost w-64" onClick={() => setShowLoadout(true)}>WEAPON LOADOUT</button>
+                <button className="btn-ghost w-64" onClick={start}>RESTART OPERATION</button>
+                <button className="btn-ghost w-64" onClick={toMenu}>ABANDON — MAIN MENU</button>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="fx-rise max-h-[92vh] w-[min(96vw,64rem)] overflow-y-auto">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="font-display text-2xl text-[#bfeaf5]">WEAPON LOADOUT <span className="text-[11px] tracking-[0.3em] text-[#7fb7c9]">// APPLIES ON RESUME</span></h2>
+                <button className="btn-ghost text-xs" onClick={() => setShowLoadout(false)}>◂ BACK TO STANDBY</button>
+              </div>
+              <LoadoutPanel loadout={loadout} onToggle={toggleAtt} />
+            </div>
+          )}
         </div>
       )}
 
@@ -471,7 +887,9 @@ const ARMORY = [
   {
     name: 'KODIAK .45',
     mode: 'SEMI-AUTO SIDEARM',
+    spec: ['.45 ACP', '1.05 KG', 'STOCKLESS', 'SLIDE ACTION'],
     desc: 'Heavy-frame depot pistol. Slow, but each .45 round hits like a sledgehammer. Iron sights, honest work.',
+    recoil: 'SIX HEAVY SHOVES, ALTERNATING TWIST — FAST RESET',
     stats: [
       ['DMG', 88, true],
       ['ROF', 34, false],
@@ -481,8 +899,10 @@ const ARMORY = [
   },
   {
     name: 'PTARMIGAN M9',
-    mode: 'FULL-AUTO PDW',
-    desc: 'Compact 9mm storm. Sprays through the blizzard — recoil climbs fast, short bursts keep it level.',
+    mode: 'FULL-AUTO / 3-RD BURST',
+    spec: ['9×19MM', '2.6 KG', 'AR PLATFORM', 'SKELETON STOCK'],
+    desc: '9mm AR-platform carbine — flat-sided receivers, straight mag, short barrel and honest iron sights. Pull through the climb; V for burst.',
+    recoil: 'BRACED CLIMB — NEAR-FLAT IN ADS',
     stats: [
       ['DMG', 40, true],
       ['ROF', 92, false],

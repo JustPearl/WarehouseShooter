@@ -46,17 +46,23 @@ export function floorTexture(): THREE.Texture {
       }
       g.stroke();
     }
-    // snow patches
-    for (let i = 0; i < 40; i++) {
+    // swept-clean patches (bare concrete where traffic has worn it)
+    for (let i = 0; i < 34; i++) {
       const x = Math.random() * w, y = Math.random() * h, r = rnd(14, 70);
       const gr = g.createRadialGradient(x, y, 1, x, y, r);
-      gr.addColorStop(0, 'rgba(228,240,246,0.85)');
-      gr.addColorStop(0.7, 'rgba(214,230,238,0.4)');
-      gr.addColorStop(1, 'rgba(214,230,238,0)');
+      gr.addColorStop(0, 'rgba(118,128,134,0.30)');
+      gr.addColorStop(1, 'rgba(118,128,134,0)');
       g.fillStyle = gr;
       g.beginPath();
       g.ellipse(x, y, r, r * rnd(0.5, 0.9), Math.random() * 3, 0, 7);
       g.fill();
+    }
+    // pale expansion-joint lines
+    g.strokeStyle = 'rgba(58,66,72,0.55)';
+    g.lineWidth = 2;
+    for (const f of [0.33, 0.66]) {
+      g.beginPath(); g.moveTo(0, h * f); g.lineTo(w, h * f); g.stroke();
+      g.beginPath(); g.moveTo(w * f, 0); g.lineTo(w * f, h); g.stroke();
     }
     // faded hazard stripe strip
     g.save();
@@ -101,17 +107,23 @@ export function wallTexture(): THREE.Texture {
     for (let y = 0; y < h; y += 128) {
       g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke();
     }
-    // frost / snow at base
-    const fg = g.createLinearGradient(0, h * 0.72, 0, h);
-    fg.addColorStop(0, 'rgba(220,235,242,0)');
-    fg.addColorStop(1, 'rgba(224,238,244,0.85)');
+    // grime + scuffs at the base (kicked, scraped, oily — no snow inside)
+    const fg = g.createLinearGradient(0, h * 0.7, 0, h);
+    fg.addColorStop(0, 'rgba(16,20,23,0)');
+    fg.addColorStop(1, 'rgba(14,18,21,0.7)');
     g.fillStyle = fg;
-    g.fillRect(0, h * 0.72, w, h * 0.28);
-    for (let i = 0; i < 40; i++) {
-      g.fillStyle = 'rgba(235,245,250,0.5)';
+    g.fillRect(0, h * 0.7, w, h * 0.3);
+    for (let i = 0; i < 46; i++) {
+      g.fillStyle = `rgba(${rnd(20, 46)},${rnd(24, 44)},${rnd(26, 42)},${rnd(0.15, 0.4)})`;
       g.beginPath();
-      g.ellipse(Math.random() * w, h - rnd(0, 40), rnd(8, 30), rnd(4, 12), 0, 0, 7);
+      g.ellipse(Math.random() * w, h - rnd(0, 46), rnd(6, 26), rnd(3, 10), 0, 0, 7);
       g.fill();
+    }
+    g.strokeStyle = 'rgba(8,11,13,0.5)';
+    g.lineWidth = 1.4;
+    for (let i = 0; i < 24; i++) {
+      const x = Math.random() * w, y = h - rnd(4, 60);
+      g.beginPath(); g.moveTo(x, y); g.lineTo(x + rnd(-30, 30), y + rnd(-8, 8)); g.stroke();
     }
   });
 }
@@ -147,10 +159,10 @@ export function crateTexture(): THREE.Texture {
     g.fillStyle = 'rgba(224,166,60,0.8)';
     g.fillText('SUPPLY // ARCTIC', 0, 26);
     g.restore();
-    // snow dusting on top edge
+    // weathered top edge — darkened wood, no snow
     const fg = g.createLinearGradient(0, 0, 0, 30);
-    fg.addColorStop(0, 'rgba(232,242,247,0.8)');
-    fg.addColorStop(1, 'rgba(232,242,247,0)');
+    fg.addColorStop(0, 'rgba(20,14,7,0.55)');
+    fg.addColorStop(1, 'rgba(20,14,7,0)');
     g.fillStyle = fg;
     g.fillRect(0, 0, w, 30);
   });
@@ -177,11 +189,12 @@ export function concreteTexture(): THREE.Texture {
       g.fill();
     }
     g.restore();
-    const fg = g.createLinearGradient(0, h - 26, 0, h);
-    fg.addColorStop(0, 'rgba(228,240,246,0)');
-    fg.addColorStop(1, 'rgba(228,240,246,0.7)');
+    // oil-darkened base instead of snow
+    const fg = g.createLinearGradient(0, h - 24, 0, h);
+    fg.addColorStop(0, 'rgba(22,26,28,0)');
+    fg.addColorStop(1, 'rgba(18,22,24,0.65)');
     g.fillStyle = fg;
-    g.fillRect(0, h - 26, w, 26);
+    g.fillRect(0, h - 24, w, 24);
   });
 }
 
@@ -225,6 +238,105 @@ export function flashTexture(): THREE.Texture {
       g.fill();
     }
     g.restore();
+  });
+}
+
+/** Wind-blown arctic snowfield: soft blue-white with drift banding and sparkle. */
+export function snowGroundTexture(): THREE.Texture {
+  return makeCanvas(512, 512, (g, w, h) => {
+    g.fillStyle = '#dfe8f0';
+    g.fillRect(0, 0, w, h);
+    // drift banding
+    for (let i = 0; i < 60; i++) {
+      const y = Math.random() * h;
+      const gr = g.createLinearGradient(0, y - rnd(6, 26), 0, y + rnd(6, 26));
+      const light = Math.random() > 0.5;
+      gr.addColorStop(0, 'rgba(0,0,0,0)');
+      gr.addColorStop(0.5, light ? 'rgba(246,250,253,0.5)' : 'rgba(172,190,205,0.4)');
+      gr.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = gr;
+      g.fillRect(0, y - 30, w, 60);
+    }
+    // fine grain
+    for (let i = 0; i < 2400; i++) {
+      g.fillStyle = Math.random() > 0.5 ? 'rgba(250,253,255,0.5)' : 'rgba(158,178,194,0.35)';
+      g.fillRect(Math.random() * w, Math.random() * h, 1.4, 1.4);
+    }
+    // ice sparkle
+    for (let i = 0; i < 260; i++) {
+      g.fillStyle = 'rgba(255,255,255,0.85)';
+      g.fillRect(Math.random() * w, Math.random() * h, 1, 1);
+    }
+    // tire ruts
+    g.strokeStyle = 'rgba(150,170,186,0.5)';
+    for (let r = 0; r < 3; r++) {
+      g.lineWidth = rnd(5, 9);
+      g.beginPath();
+      let x = Math.random() * w, y = 0;
+      g.moveTo(x, y);
+      while (y < h) { y += rnd(20, 44); x += rnd(-26, 26); g.lineTo(x, y); }
+      g.stroke();
+    }
+  });
+}
+
+/** Galvanized chain-link fence mesh (alpha). */
+export function chainLinkTexture(): THREE.Texture {
+  return makeCanvas(128, 128, (g, w, h) => {
+    g.clearRect(0, 0, w, h);
+    g.strokeStyle = 'rgba(205,216,224,0.95)';
+    g.lineWidth = 3.2;
+    g.lineCap = 'round';
+    const s = 16; // diamond pitch
+    for (let d = -h; d < w + h; d += s) {
+      g.beginPath(); g.moveTo(d, 0); g.lineTo(d + h, h); g.stroke();
+      g.beginPath(); g.moveTo(d + h, 0); g.lineTo(d, h); g.stroke();
+    }
+    // darker core pass for depth
+    g.strokeStyle = 'rgba(120,134,144,0.75)';
+    g.lineWidth = 1.2;
+    for (let d = -h; d < w + h; d += s) {
+      g.beginPath(); g.moveTo(d + 1, 0); g.lineTo(d + h + 1, h); g.stroke();
+      g.beginPath(); g.moveTo(d + h - 1, 0); g.lineTo(d - 1, h); g.stroke();
+    }
+  });
+}
+
+/** Corrugated roof decking — dark galvanised steel, rust blooms, bolt rows. */
+export function roofTexture(): THREE.Texture {
+  return makeCanvas(512, 512, (g, w, h) => {
+    g.fillStyle = '#2b333a';
+    g.fillRect(0, 0, w, h);
+    const rib = 26;
+    for (let x = 0; x < w; x += rib) {
+      const gr = g.createLinearGradient(x, 0, x + rib, 0);
+      gr.addColorStop(0, 'rgba(150,168,178,0.16)');
+      gr.addColorStop(0.5, 'rgba(6,9,11,0.30)');
+      gr.addColorStop(1, 'rgba(150,168,178,0.06)');
+      g.fillStyle = gr;
+      g.fillRect(x, 0, rib, h);
+    }
+    // panel seams + bolt rows
+    g.strokeStyle = 'rgba(8,11,13,0.7)';
+    g.lineWidth = 3;
+    for (const y of [128, 384]) {
+      g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke();
+      g.fillStyle = 'rgba(96,110,120,0.5)';
+      for (let x = 13; x < w; x += 26) { g.beginPath(); g.arc(x, y - 8, 2.2, 0, 7); g.fill(); }
+    }
+    // rust blooms + water stains
+    for (let i = 0; i < 44; i++) {
+      const x = Math.random() * w, y = Math.random() * h, r = rnd(8, 44);
+      const gr = g.createRadialGradient(x, y, 1, x, y, r);
+      gr.addColorStop(0, 'rgba(116,70,42,0.30)');
+      gr.addColorStop(1, 'rgba(116,70,42,0)');
+      g.fillStyle = gr;
+      g.beginPath(); g.ellipse(x, y, r, r * rnd(0.5, 1), Math.random() * 3, 0, 7); g.fill();
+    }
+    for (let i = 0; i < 500; i++) {
+      g.fillStyle = `rgba(${rnd(10, 40)},${rnd(12, 42)},${rnd(14, 46)},${rnd(0.04, 0.12)})`;
+      g.fillRect(Math.random() * w, Math.random() * h, rnd(1, 4), rnd(1, 4));
+    }
   });
 }
 
