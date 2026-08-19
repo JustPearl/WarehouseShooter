@@ -106,6 +106,8 @@ interface WeaponRt {
   heat: number;
   reloadT: number; // -1 idle
   kickV: number;
+  aimJitX: number; // pitch aim error baked into the gun's orientation (rad)
+  aimJitY: number; // yaw aim error baked into the gun's orientation (rad)
 }
 
 interface Enemy {
