@@ -132,6 +132,26 @@ html, body, #root {
   100% { opacity: 0; }
 }
 @keyframes kfBlink { 0% { opacity: 1; } 100% { opacity: 0.25; } }
+@keyframes kfFlicker {
+  0%, 100% { opacity: 1; }
+  7% { opacity: 0.72; } 9% { opacity: 0.96; }
+  41% { opacity: 0.85; } 43% { opacity: 1; }
+  68% { opacity: 0.6; } 70% { opacity: 0.92; } 72% { opacity: 0.78; } 74% { opacity: 1; }
+}
+@keyframes kfSnowDrift {
+  0% { background-position: 0 0, 0 0, 0 0; }
+  100% { background-position: -140px 720px, 90px 540px, -60px 900px; }
+}
+.fx-flicker { animation: kfFlicker 7.5s linear infinite; }
+.fx-flicker2 { animation: kfFlicker 9.2s linear infinite reverse; }
+.fx-snowdrift {
+  background-image:
+    radial-gradient(2px 2px at 22% 12%, rgba(232,244,250,0.75) 40%, transparent 60%),
+    radial-gradient(1.5px 1.5px at 64% 34%, rgba(232,244,250,0.55) 40%, transparent 60%),
+    radial-gradient(2.5px 2.5px at 83% 62%, rgba(232,244,250,0.4) 40%, transparent 60%);
+  background-size: 190px 190px, 260px 260px, 340px 340px;
+  animation: kfSnowDrift 26s linear infinite;
+}
 
 /* stat bars */
 .stat-bar { height: 5px; background: rgba(127, 183, 201, 0.16); }

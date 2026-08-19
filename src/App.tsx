@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Engine } from './game/engine';
-import type { EndStats, GameEvent, HudState } from './game/engine';
+import type { EndStats, GameEvent, HudState } from './game/types';
 import { sfx } from './game/audio';
-
-const MENU_BG = 'https://image.qwenlm.ai/generated-images/1257f3b2-7150-473b-9d84-c30ad3b818bb/_result.png';
 
 const DEFAULT_HUD: HudState = {
   phase: 'menu',
@@ -167,6 +165,111 @@ function fmtTime(s: number) {
   const m = Math.floor(s / 60);
   const ss = Math.floor(s % 60);
   return `${m}:${ss.toString().padStart(2, '0')}`;
+}
+
+/* ---------- procedural briefing backdrop: the depot at night, no assets required ---------- */
+function BriefingBackdrop() {
+  const ribs = Array.from({ length: 40 }, (_, i) => 40 + i * 40);
+  return (
+    <div className="fx-kenburns absolute inset-0">
+      <svg className="h-full w-full" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" aria-hidden>
+        <defs>
+          <linearGradient id="bbSky" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#04080d" />
+            <stop offset="1" stopColor="#0b1622" />
+          </linearGradient>
+          <linearGradient id="bbMoon" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#0e1d2e" />
+            <stop offset="0.55" stopColor="#27425c" />
+            <stop offset="1" stopColor="#a9c6de" />
+          </linearGradient>
+          <linearGradient id="bbFloor" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#131c24" />
+            <stop offset="1" stopColor="#070c11" />
+          </linearGradient>
+          <linearGradient id="bbCone" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#ffc46e" stopOpacity="0.5" />
+            <stop offset="1" stopColor="#ff9d2e" stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id="bbShaft" x1="1" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#9fb9d4" stopOpacity="0.32" />
+            <stop offset="1" stopColor="#9fb9d4" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+
+        {/* back wall + corrugation */}
+        <rect width="1600" height="640" fill="#0d151d" />
+        <rect width="1600" height="640" fill="url(#bbSky)" opacity="0.55" />
+        {ribs.map((x) => (
+          <rect key={x} x={x} y="0" width="3" height="640" fill="#1a2733" opacity="0.6" />
+        ))}
+        <rect y="205" width="1600" height="3" fill="#1a2733" opacity="0.8" />
+        <rect y="430" width="1600" height="3" fill="#1a2733" opacity="0.8" />
+
+        {/* the breach — torn steel opening onto the moonlit yard */}
+        <polygon points="1150,262 1204,238 1262,258 1330,236 1408,254 1462,300 1470,388 1452,470 1466,548 1388,584 1300,566 1222,588 1160,540 1138,436 1156,340" fill="url(#bbMoon)" />
+        {/* chain-link fence + flood tower through the hole */}
+        {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
+          <rect key={i} x={1170 + i * 38} y="392" width="3" height="160" fill="#0a141d" />
+        ))}
+        <rect x="1160" y="418" width="306" height="4" fill="#0a141d" />
+        <rect x="1160" y="492" width="306" height="4" fill="#0a141d" />
+        <rect x="1400" y="300" width="7" height="250" fill="#08111a" />
+        <rect x="1382" y="296" width="44" height="12" fill="#08111a" />
+        <circle cx="1382" cy="302" r="5" fill="#d7e6f2" opacity="0.9" />
+        {/* snowfield through the breach */}
+        <polygon points="1138,556 1470,548 1466,584 1160,590" fill="#33465a" opacity="0.55" />
+        {/* jagged torn edges */}
+        <polygon points="1150,262 1204,238 1262,258 1330,236 1408,254 1462,300 1452,292 1398,246 1324,228 1256,250 1198,230 1142,254" fill="#05090e" />
+
+        {/* moonlight shaft across the floor */}
+        <polygon points="1150,300 1462,320 1240,900 780,900" fill="url(#bbShaft)" />
+
+        {/* floor */}
+        <polygon points="0,640 1600,640 1600,900 0,900" fill="url(#bbFloor)" />
+        <polygon points="0,640 1600,640 1600,648 0,648" fill="#1c2936" opacity="0.7" />
+
+        {/* crate stacks + barrels, left flank */}
+        <g fill="#141e27">
+          <rect x="70" y="500" width="150" height="140" />
+          <rect x="86" y="372" width="122" height="128" transform="rotate(-2 147 436)" />
+          <rect x="252" y="540" width="128" height="100" />
+        </g>
+        <g fill="#1b2833">
+          <rect x="70" y="500" width="150" height="8" />
+          <rect x="86" y="372" width="122" height="8" />
+        </g>
+        <g fill="#111a22">
+          <rect x="430" y="546" width="64" height="94" rx="6" />
+          <rect x="506" y="546" width="64" height="94" rx="6" />
+          <ellipse cx="462" cy="546" rx="32" ry="9" fill="#1d2b37" />
+          <ellipse cx="538" cy="546" rx="32" ry="9" fill="#1d2b37" />
+        </g>
+
+        {/* wrecked truck silhouette, right of center */}
+        <g fill="#0e161e">
+          <rect x="880" y="512" width="270" height="118" />
+          <rect x="1090" y="462" width="104" height="70" />
+          <circle cx="930" cy="640" r="30" fill="#080d12" />
+          <circle cx="1100" cy="640" r="30" fill="#080d12" />
+        </g>
+
+        {/* hanging tungsten lamps */}
+        {[{ x: 560, f: 'fx-flicker' }, { x: 1010, f: 'fx-flicker2' }].map((l) => (
+          <g key={l.x} className={l.f}>
+            <rect x={l.x - 1} y="0" width="2" height="180" fill="#0a0f14" />
+            <rect x={l.x - 16} y="176" width="32" height="12" fill="#241a10" />
+            <polygon points={`${l.x - 130},640 ${l.x + 130},640 ${l.x + 26},188 ${l.x - 26},188`} fill="url(#bbCone)" />
+            <ellipse cx={l.x} cy="642" rx="150" ry="26" fill="#ffab3d" opacity="0.13" />
+            <circle cx={l.x} cy="188" r="6" fill="#ffd9a0" />
+          </g>
+        ))}
+
+        <rect width="1600" height="130" fill="#04080d" opacity="0.7" />
+      </svg>
+      <div className="fx-snowdrift absolute inset-0 opacity-70" />
+    </div>
+  );
 }
 
 /* ============================== APP ============================== */
@@ -438,7 +541,7 @@ export default function App() {
       {/* ======================= MENU ======================= */}
       {hud.phase === 'menu' && (
         <div className="absolute inset-0 overflow-hidden">
-          <div className="fx-kenburns absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url(${MENU_BG})` }} />
+          <BriefingBackdrop />
           <div className="absolute inset-0 bg-[linear-gradient(100deg,rgba(4,9,13,0.94)_18%,rgba(4,9,13,0.72)_48%,rgba(4,9,13,0.45)_100%)]" />
           <div className="fx-vignette absolute inset-0" />
 

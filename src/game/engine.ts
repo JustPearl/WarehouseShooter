@@ -1471,32 +1471,7 @@ export class Engine {
       l.light.intensity = l.base * (0.8 + 0.2 * Math.abs(f)) * dip;
     }
 
-    // tracers
-    for (const tr of [...this.tracersP, ...this.tracersE]) {
-      if (tr.life > 0) {
-        tr.life -= dt;
-        const k = Math.max(0.05, tr.life / 0.07);
-        tr.mesh.scale.x = 0.022 * k;
-        tr.mesh.scale.y = 0.022 * k;
-        if (tr.life <= 0) tr.mesh.visible = false;
-      }
-    }
-    // particles
-    for (const p of this.particles) {
-      if (p.life > 0) {
-        p.life -= dt;
-        p.vel.y -= p.grav * dt;
-        p.mesh.position.addScaledVector(p.vel, dt);
-        if (p.mesh.position.y < 0.02) {
-          p.mesh.position.y = 0.02;
-          p.vel.y *= -0.3;
-          p.vel.x *= 0.7;
-          p.vel.z *= 0.7;
-        }
-        p.mesh.scale.setScalar(Math.max(0.001, p.size * (p.life / p.maxLife)));
-        if (p.life <= 0) p.mesh.visible = false;
-      }
-    }
+    this.fx.update(dt);
   }
 
   /* ------------------------------ hud ------------------------------ */
