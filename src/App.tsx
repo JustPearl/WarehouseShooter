@@ -615,8 +615,8 @@ const ARMORY = [
   {
     name: 'PTARMIGAN M9',
     mode: 'FULL-AUTO / 3-RD BURST',
-    spec: ['9×19MM', '2.45 KG', 'FOLDING STOCK', 'SELECT-FIRE'],
-    desc: 'Compact 9mm storm. The stock drinks the roll — recoil climbs in a weave. Tap V for a tight 3-round burst at range.',
+    spec: ['9×19MM', '2.6 KG', 'AR PLATFORM', 'SKELETON STOCK'],
+    desc: '9mm AR-platform carbine — flat-sided receivers, straight mag, short barrel and honest iron sights. Pull through the climb; V for burst.',
     recoil: 'BRACED CLIMB — NEAR-FLAT IN ADS',
     stats: [
       ['DMG', 40, true],

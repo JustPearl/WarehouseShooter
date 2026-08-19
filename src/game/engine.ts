@@ -133,12 +133,12 @@ const WEAPON_CFGS: WeaponCfg[] = [
     id: 'smg', name: 'PTARMIGAN M9', short: 'PTM 9MM', auto: true,
     dmg: 13, headMul: 2.0, magSize: 30, startReserve: 150,
     fireDelay: 0.072, reloadTime: 1.75, kick: 0.0405, spread: 0.0095, bloom: 0.02, moveSpread: 0.03,
-    // long-gun hold; model is scaled 1.2× in buildSMG, so the dot line lands at y=+0.106
-    // and the stock reaches +0.39 — ADS sits back at -0.48 to clear the camera near plane
-    hip: new THREE.Vector3(0.27, -0.26, -0.56), ads: new THREE.Vector3(0, -0.106, -0.48), adsFov: 58,
-    // 9mm PDW with a folding stock: rounds 1-3 are forgiving, the pattern ramps to a steady climb
-    // over ~8 rounds, then plateaus while the yaw weaves a fixed, learnable S — pull down and it
-    // stays on target; hold through the whole mag and it walks up a wall
+    // AR shoulder weld; the iron sight line lands at y=+0.074 after buildSMG's 1.2× scale
+    // and the skeleton pad reaches +0.40 — ADS sits back at -0.48 to clear the near plane
+    hip: new THREE.Vector3(0.27, -0.26, -0.56), ads: new THREE.Vector3(0, -0.074, -0.48), adsFov: 58,
+    // 9mm AR carbine shouldered on a skeleton stock: rounds 1-3 are forgiving, the pattern ramps
+    // to a steady climb over ~8 rounds, then plateaus while the yaw weaves a fixed, learnable S —
+    // pull down and it stays on target; hold through the whole mag and it walks up a wall
     recoil: {
       caliberImpulse: 0.58, weightKg: 2.45, stock: true, action: 'blowback',
       patternPitch: [0.50, 0.56, 0.62, 0.70, 0.78, 0.88, 0.98, 1.06, 1.10, 1.08, 1.02, 0.97, 0.95, 0.95, 0.97, 0.99],

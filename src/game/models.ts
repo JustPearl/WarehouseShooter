@@ -127,104 +127,137 @@ export function buildPistol(): WeaponModel {
 }
 
 /* ============================================================
-   PTARMIGAN M9 — original compact 9mm PDW / SMG, full-auto
-   True proportions at 1.5× first-person scale (real compact PDW:
-   ~47cm with stock out, ~24cm tall, ~5.5cm wide). Forward = -Z.
-    Bore axis at y=+0.006; red-dot center at y=+0.088. The whole group is scaled
-    1.2× for first-person presence (~89cm on screen, ~2.8× the pistol's ~32cm);
-    engine anchors are compensated (ads.y = -0.106, ads.z = -0.48).   ============================================================ */
+   PTARMIGAN M9 — original 9mm AR-platform carbine, full-auto.
+   Flat-sided upper/lower receivers with true AR proportions (19cm receiver,
+   6.2cm wide, ~7.4cm tall), free-float handguard, short barrel, straight
+   stick mag, skeleton stock, basic iron sights. Forward = -Z.
+   Bore axis at y=0; iron sight line at y=+0.062. The whole group is scaled
+   1.2× for first-person presence; engine anchors are compensated
+   (ads.y = -0.074, ads.z = -0.48). Total length ~75cm ≈ 2.3× the sidearm.   ============================================================ */
 export function buildSMG(): WeaponModel {
   const g = new THREE.Group();
 
-  // ---- receiver: 28cm long (real ~19cm), slim PDW profile ----
-  g.add(box(0.058, 0.072, 0.28, steel, 0, 0, -0.01)); // spans z -0.15..+0.13
-  g.add(box(0.054, 0.042, 0.17, steelDark, 0, -0.020, 0.015)); // lower receiver
-  g.add(box(0.012, 0.024, 0.044, steelDark, 0.026, 0.006, 0.015)); // ejection port
-  // top rail + reflex sight — dot centered at y=0.088
-  g.add(box(0.040, 0.014, 0.26, steelDark, 0, 0.043, -0.02));
-  g.add(box(0.034, 0.046, 0.052, polymer, 0, 0.080, -0.055));
-  g.add(box(0.026, 0.034, 0.004, new THREE.MeshStandardMaterial({ color: 0x0d1114, metalness: 0.2, roughness: 0.2 }), 0, 0.084, -0.080));
-  const dot = new THREE.Mesh(new THREE.SphereGeometry(0.0032, 8, 8), sightGlow);
-  dot.position.set(0, 0.088, -0.078);
-  g.add(dot);
-  // backup iron post over the shroud root
-  g.add(box(0.006, 0.022, 0.006, steelDark, 0, 0.058, -0.140));
+  // ---- upper receiver: flat-sided AR upper, true 19cm length ----
+  g.add(box(0.062, 0.040, 0.190, steel, 0, 0.006, 0.010)); // z -0.085..+0.105
+  g.add(box(0.040, 0.012, 0.185, steelDark, 0, 0.032, 0.010)); // top picatinny rail
+  for (let i = 0; i < 7; i++) g.add(box(0.040, 0.004, 0.006, steel, 0, 0.039, -0.052 + i * 0.021)); // rail teeth
+  // ejection port + hinged dust cover on the right side (+X)
+  g.add(box(0.004, 0.022, 0.044, steelDark, 0.032, 0.004, 0.000)); // port recess
+  g.add(box(0.004, 0.026, 0.048, steel, 0.0345, 0.004, 0.001)); // dust cover
+  g.add(box(0.012, 0.020, 0.016, steelDark, 0.033, 0.002, 0.042)); // brass deflector
+  // forward assist + rear charging handle
+  const fa = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, 0.014, 8), steelDark);
+  fa.rotation.z = Math.PI / 2;
+  fa.position.set(0.036, -0.004, 0.058);
+  fa.castShadow = true;
+  g.add(fa);
+  g.add(box(0.026, 0.007, 0.012, steelDark, -0.010, 0.040, 0.102));
+  g.add(box(0.010, 0.015, 0.008, steelDark, -0.020, 0.036, 0.106));
 
-  // ---- barrel shroud with vent slots + hand stop ----
-  const shroud = new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.021, 0.21, 12), steel);
+  // ---- barrel nut + free-float handguard (17.5cm) with M-LOK slots ----
+  g.add(box(0.056, 0.044, 0.022, steelDark, 0, 0.004, -0.096));
+  const shroud = new THREE.Mesh(new THREE.CylinderGeometry(0.027, 0.027, 0.175, 8), steel);
   shroud.rotation.x = Math.PI / 2;
-  shroud.position.set(0, 0.006, -0.265); // spans -0.16..-0.37
+  shroud.rotation.z = Math.PI / 8;
+  shroud.position.set(0, 0.002, -0.195); // z -0.107..-0.282
   shroud.castShadow = true;
   g.add(shroud);
-  for (let i = 0; i < 3; i++) g.add(box(0.046, 0.010, 0.022, steelDark, 0, 0.006, -0.210 - i * 0.055));
-  g.add(box(0.046, 0.018, 0.014, steelDark, 0, -0.020, -0.345)); // hand stop
+  for (const sx of [-0.024, 0.024]) for (let i = 0; i < 3; i++)
+    g.add(box(0.006, 0.026, 0.016, steelDark, sx, 0.002, -0.150 - i * 0.045)); // side slots
+  for (let i = 0; i < 3; i++) g.add(box(0.020, 0.006, 0.016, steelDark, 0, -0.024, -0.150 - i * 0.045)); // bottom slots
 
-  // ---- barrel + muzzle brake ----
-  const barrelTip = new THREE.Mesh(new THREE.CylinderGeometry(0.010, 0.010, 0.06, 10), steelDark);
+  // ---- short barrel + slotted birdcage flash hider ----
+  const barrelTip = new THREE.Mesh(new THREE.CylinderGeometry(0.010, 0.010, 0.10, 10), steelDark);
   barrelTip.rotation.x = Math.PI / 2;
-  barrelTip.position.set(0, 0.006, -0.385);
+  barrelTip.position.set(0, 0.002, -0.332); // -0.282..-0.382
+  barrelTip.castShadow = true;
   g.add(barrelTip);
-  const brake = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.012, 0.045, 10), steelDark);
-  brake.rotation.x = Math.PI / 2;
-  brake.position.set(0, 0.006, -0.395);
-  g.add(brake);
+  const hider = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.012, 0.045, 10), steelDark);
+  hider.rotation.x = Math.PI / 2;
+  hider.position.set(0, 0.002, -0.404);
+  hider.castShadow = true;
+  g.add(hider);
+  for (let i = 0; i < 2; i++) g.add(box(0.028, 0.005, 0.008, steel, 0, 0.002, -0.394 - i * 0.016));
 
-  // ---- magwell + 30-round stick mag (real ~20cm) with ribs & amber band ----
-  g.add(box(0.060, 0.034, 0.070, steelDark, 0, -0.050, -0.038));
-  const mag = box(0.052, 0.21, 0.060, polymer, 0, -0.135, -0.045);
-  mag.rotation.x = -0.12;
+  // ---- basic iron sights: front post + rear aperture, sight line at y=+0.062 ----
+  g.add(box(0.020, 0.036, 0.020, steelDark, 0, 0.028, -0.270)); // front base
+  g.add(box(0.004, 0.028, 0.008, steelDark, -0.008, 0.050, -0.270)); // ear L
+  g.add(box(0.004, 0.028, 0.008, steelDark, 0.008, 0.050, -0.270)); // ear R
+  g.add(box(0.004, 0.024, 0.004, steel, 0, 0.050, -0.270)); // post
+  g.add(box(0.005, 0.006, 0.005, sightGlow, 0, 0.060, -0.270)); // fiber tip
+  g.add(box(0.016, 0.018, 0.020, steelDark, 0, 0.048, 0.075)); // rear riser
+  const aperture = new THREE.Mesh(new THREE.TorusGeometry(0.0055, 0.0018, 8, 16), steel);
+  aperture.position.set(0, 0.062, 0.075);
+  aperture.castShadow = true;
+  g.add(aperture);
+  g.add(box(0.004, 0.020, 0.006, steelDark, -0.011, 0.060, 0.075)); // ear L
+  g.add(box(0.004, 0.020, 0.006, steelDark, 0.011, 0.060, 0.075)); // ear R
+
+  // ---- lower receiver: flat-sided AR lower with magwell flare + takedown pins ----
+  g.add(box(0.060, 0.034, 0.140, steel, 0, -0.031, 0.020)); // z -0.050..+0.090
+  g.add(box(0.064, 0.022, 0.064, steelDark, 0, -0.056, -0.028)); // magwell flare
+  for (const pz of [-0.045, 0.075]) {
+    const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.070, 8), steelDark);
+    pin.rotation.z = Math.PI / 2;
+    pin.position.set(0, -0.018, pz);
+    pin.castShadow = true;
+    g.add(pin);
+  }
+
+  // ---- straight 30-round stick mag — drops perfectly vertical, zero cant ----
+  const mag = box(0.026, 0.175, 0.060, polymer, 0, -0.152, -0.028);
   g.add(mag);
-  const ribA = box(0.054, 0.006, 0.062, steelDark, 0, -0.115, -0.047);
-  ribA.rotation.x = -0.12;
-  g.add(ribA);
-  const ribB = box(0.054, 0.006, 0.062, steelDark, 0, -0.165, -0.053);
-  ribB.rotation.x = -0.12;
-  g.add(ribB);
-  const band = box(0.054, 0.016, 0.062, amberPart, 0, -0.235, -0.058);
-  band.rotation.x = -0.12;
-  g.add(band);
+  g.add(box(0.004, 0.150, 0.012, steelDark, -0.012, -0.140, -0.028)); // witness rib L
+  g.add(box(0.004, 0.150, 0.012, steelDark, 0.012, -0.140, -0.028)); // witness rib R
+  g.add(box(0.028, 0.014, 0.062, amberPart, 0, -0.228, -0.028)); // base band
+  g.add(box(0.030, 0.010, 0.064, steelDark, 0, -0.243, -0.028)); // baseplate
 
-  // ---- angled foregrip with finger grooves ----
-  const fg = box(0.030, 0.088, 0.040, polymer, 0, -0.072, -0.220);
-  fg.rotation.x = 0.20;
-  g.add(fg);
-  const grA = box(0.032, 0.010, 0.042, steelDark, 0, -0.058, -0.212);
-  grA.rotation.x = 0.20;
-  g.add(grA);
-  const grB = box(0.032, 0.010, 0.042, steelDark, 0, -0.086, -0.228);
-  grB.rotation.x = 0.20;
-  g.add(grB);
+  // ---- trigger group: curved trigger, guard, safety lever ----
+  g.add(box(0.010, 0.048, 0.012, steelDark, 0, -0.072, 0.028)); // guard front post
+  g.add(box(0.010, 0.010, 0.060, steelDark, 0, -0.094, 0.055)); // guard bottom
+  const trg = box(0.008, 0.026, 0.010, amberPart, 0, -0.068, 0.050);
+  trg.rotation.x = 0.35;
+  g.add(trg);
+  g.add(box(0.008, 0.018, 0.010, amberPart, -0.033, -0.030, 0.048)); // safety lever
 
-  // ---- pistol grip, trigger group, selector, charging handle ----
-  const pg = box(0.052, 0.150, 0.060, polymer, 0, -0.115, 0.095);
-  pg.rotation.x = 0.30;
+  // ---- A2-style pistol grip, raked back ----
+  const pg = box(0.036, 0.105, 0.050, polymer, 0, -0.100, 0.088);
+  pg.rotation.x = 0.26;
   g.add(pg);
-  const pgCap = box(0.048, 0.012, 0.056, amberPart, 0, -0.188, 0.118);
-  pgCap.rotation.x = 0.30;
+  const pgTex = box(0.032, 0.010, 0.046, steelDark, 0, -0.062, 0.076);
+  pgTex.rotation.x = 0.26;
+  g.add(pgTex);
+  const pgCap = box(0.038, 0.012, 0.052, amberPart, 0, -0.152, 0.102);
+  pgCap.rotation.x = 0.26;
   g.add(pgCap);
-  g.add(box(0.010, 0.050, 0.012, steelDark, 0, -0.075, 0.035)); // guard front
-  g.add(box(0.010, 0.012, 0.060, steelDark, 0, -0.098, 0.065)); // guard bottom
-  g.add(box(0.008, 0.026, 0.008, amberPart, 0, -0.068, 0.060)); // trigger
-  g.add(box(0.008, 0.020, 0.010, amberPart, -0.033, -0.004, 0.055)); // selector
-  g.add(box(0.010, 0.010, 0.046, amberPart, 0.036, 0.020, 0.030)); // charging handle
 
-  // ---- folding stock: hinge, twin arms, buttpad (extends total to ~74cm) ----
-  g.add(box(0.030, 0.050, 0.030, steelDark, 0, 0.008, 0.145)); // hinge block
-  g.add(box(0.008, 0.008, 0.020, amberPart, -0.030, 0.008, 0.145)); // hinge pin
-  g.add(box(0.013, 0.034, 0.15, steelDark, -0.024, 0.010, 0.22));
-  g.add(box(0.013, 0.034, 0.15, steelDark, 0.024, 0.010, 0.22));
-  g.add(box(0.062, 0.070, 0.024, polymer, 0, 0.006, 0.305));
-  g.add(box(0.066, 0.074, 0.010, amberPart, 0, 0.006, 0.320));
+  // ---- buffer tube + open-frame skeleton stock ----
+  const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.140, 10), steelDark);
+  tube.rotation.x = Math.PI / 2;
+  tube.position.set(0, 0.012, 0.175); // z 0.105..0.245
+  tube.castShadow = true;
+  g.add(tube);
+  const nut = new THREE.Mesh(new THREE.CylinderGeometry(0.021, 0.021, 0.012, 6), steel);
+  nut.rotation.x = Math.PI / 2;
+  nut.position.set(0, 0.012, 0.112); // castle nut
+  nut.castShadow = true;
+  g.add(nut);
+  // skeleton frame: front link + top/bottom struts, open middle, slim pad
+  g.add(box(0.030, 0.070, 0.014, steelDark, 0, 0.012, 0.247)); // front link plate
+  g.add(box(0.010, 0.012, 0.070, steelDark, 0, 0.045, 0.282)); // top strut
+  g.add(box(0.010, 0.012, 0.070, steelDark, 0, -0.021, 0.282)); // bottom strut
+  g.add(box(0.045, 0.085, 0.014, polymer, 0, 0.012, 0.318)); // buttpad frame
+  g.add(box(0.049, 0.089, 0.008, amberPart, 0, 0.012, 0.327)); // rubber pad
 
   const muzzle = new THREE.Object3D();
-  muzzle.position.set(0, 0.006, -0.42);
+  muzzle.position.set(0, 0.002, -0.435);
   muzzle.rotation.y = Math.PI; // gun is built facing -Z: make +Z point down the barrel
   g.add(muzzle);
   const flash = addFlash(muzzle, 0.27);
 
-  // presence pass: first-person long guns read best oversized. Push the whole PDW
-  // to ~1.8× real scale (~89cm on screen) so it dominates the frame against the
-  // sidearm — engine ads/hip anchors are compensated for this scale.
+  // presence pass: first-person long guns read best oversized. Push the whole carbine
+  // to ~1.8× real scale so it dominates the frame against the sidearm —
+  // engine ads/hip anchors are compensated for this scale.
   g.scale.setScalar(1.2);
 
   return { group: g, muzzle, flash };
