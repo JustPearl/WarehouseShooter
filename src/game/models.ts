@@ -12,7 +12,7 @@ const sightGlow = new THREE.MeshStandardMaterial({
   color: 0xffd9a0, emissive: 0xffb356, emissiveIntensity: 2.2, metalness: 0, roughness: 0.4,
 });
 const redGlow = new THREE.MeshStandardMaterial({
-  color: 0xff3b30, emissive: 0xff2015, emissiveIntensity: 2.6, metalness: 0, roughness: 0.4,
+  color: 0xff3b30, emissive: 0xff2015, emissiveIntensity: 1.5, metalness: 0, roughness: 0.4,
 });
 
 const flashTex = flashTexture();
@@ -230,8 +230,8 @@ function getSkinMats(i: number): SkinMats {
     glove: new THREE.MeshStandardMaterial({ color: 0x191d20, roughness: 0.9 }),
     boot: new THREE.MeshStandardMaterial({ color: 0x14171a, roughness: 0.85 }),
     mask: new THREE.MeshStandardMaterial({ color: 0x22262a, roughness: 0.9 }),
-    visor: new THREE.MeshStandardMaterial({ color: 0x14060a, emissive: sk.visor, emissiveIntensity: 2.6, roughness: 0.25 }),
-    strobe: new THREE.MeshStandardMaterial({ color: 0x220000, emissive: 0xff2222, emissiveIntensity: 1.8 }),
+    visor: new THREE.MeshStandardMaterial({ color: 0x14060a, emissive: sk.visor, emissiveIntensity: 1.6, roughness: 0.25 }),
+    strobe: new THREE.MeshStandardMaterial({ color: 0x220000, emissive: 0xff2222, emissiveIntensity: 1.1 }),
   };
   skinMatCache.set(i, m);
   return m;

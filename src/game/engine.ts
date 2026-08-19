@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { sfx } from './audio';
-import { floorTexture, wallTexture, crateTexture, concreteTexture, flashTexture, dotTexture } from './textures';
+import { floorTexture, wallTexture, crateTexture, concreteTexture, flashTexture, dotTexture, snowGroundTexture, chainLinkTexture } from './textures';
 import { buildPistol, buildSMG, buildMercenary, MERC_SKINS } from './models';
 import type { WeaponModel, MercModel } from './models';
 
@@ -59,8 +59,10 @@ interface Hooks {
 /* ============================== constants ============================== */
 
 const EYE = 1.62;
-const HALF_W = 32;
+const HALF_W = 32; // warehouse interior half-extents
 const HALF_D = 22;
+const YARD_W = 47; // fenced snow yard half-extents (playable beyond the walls)
+const YARD_D = 37;
 const GRAV = 13;
 
 /** Physical recoil personality: how the gun is held and what it fires shapes the pattern. */
@@ -243,9 +245,10 @@ export class Engine {
   // world
   private solidMeshes: THREE.Mesh[] = [];
   private colliderBoxes: THREE.Box3[] = [];
-  private lamps: { light: THREE.PointLight; base: number; seed: number }[] = [];
+  private lamps: { light: THREE.Light; base: number; seed: number }[] = [];
   private snow!: THREE.Points;
   private snowVel!: Float32Array;
+  private motes!: THREE.Points; // dust hanging in the warehouse air
 
   // entities & pools
   private enemies: Enemy[] = [];
@@ -304,15 +307,15 @@ export class Engine {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.12;
+    this.renderer.toneMappingExposure = 1.05;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x0c161f);
-    this.scene.fog = new THREE.Fog(0x0c161f, 18, 95);
+    this.scene.background = new THREE.Color(0x070d13);
+    this.scene.fog = new THREE.FogExp2(0x0a121a, 0.012);
 
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    (this.scene as unknown as { environmentIntensity: number }).environmentIntensity = 0.32;
+    (this.scene as unknown as { environmentIntensity: number }).environmentIntensity = 0.22;
 
     this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.05, 220);
     this.camera.rotation.order = 'YXZ';
@@ -342,20 +345,30 @@ export class Engine {
   /* ------------------------------ lights ------------------------------ */
 
   private buildLights() {
-    const hemi = new THREE.HemisphereLight(0x8fb4c8, 0x20262c, 0.8);
+    // muted sky/ground ambient — the arctic night reads through shadow, not fill
+    const hemi = new THREE.HemisphereLight(0x46586a, 0x101316, 0.5);
     this.scene.add(hemi);
-    const moon = new THREE.DirectionalLight(0xbfdcf0, 1.7);
-    moon.position.set(18, 34, -14);
+
+    // moon: cool, low-contrast key with soft shadows over the whole compound
+    const moon = new THREE.DirectionalLight(0x9fb9d4, 1.35);
+    moon.position.set(30, 44, -26);
     moon.castShadow = true;
-    moon.shadow.mapSize.set(1024, 1024);
-    moon.shadow.camera.left = -40;
-    moon.shadow.camera.right = 40;
-    moon.shadow.camera.top = 40;
-    moon.shadow.camera.bottom = -40;
-    moon.shadow.camera.near = 4;
-    moon.shadow.camera.far = 90;
-    moon.shadow.bias = -0.0006;
+    moon.shadow.mapSize.set(2048, 2048);
+    moon.shadow.camera.left = -58;
+    moon.shadow.camera.right = 58;
+    moon.shadow.camera.top = 52;
+    moon.shadow.camera.bottom = -52;
+    moon.shadow.camera.near = 6;
+    moon.shadow.camera.far = 130;
+    moon.shadow.bias = -0.00035;
+    moon.shadow.normalBias = 0.035;
+    (moon.shadow as unknown as { radius: number }).radius = 3;
     this.scene.add(moon);
+
+    // faint blue bounce off the snowfield, lifting outdoor shadows just enough
+    const bounce = new THREE.DirectionalLight(0x54687e, 0.35);
+    bounce.position.set(-24, 10, 30);
+    this.scene.add(bounce);
   }
 
   /* ------------------------------ world ------------------------------ */
@@ -373,6 +386,7 @@ export class Engine {
   }
 
   private buildWorld() {
+    // ---- interior: bare swept-concrete depot floor (no snow inside) ----
     const floorMat = new THREE.MeshStandardMaterial({ map: floorTexture(), roughness: 0.96, metalness: 0.02 });
     floorMat.map!.repeat.set(6, 4);
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(HALF_W * 2 + 2, HALF_D * 2 + 2), floorMat);
@@ -385,7 +399,7 @@ export class Engine {
     const concreteMat = new THREE.MeshStandardMaterial({ map: concreteTexture(), roughness: 0.95 });
     const beamMat = new THREE.MeshStandardMaterial({ color: 0x2c343a, roughness: 0.5, metalness: 0.65 });
     const rustMat = new THREE.MeshStandardMaterial({ color: 0x6e4a33, roughness: 0.85, metalness: 0.4 });
-    const snowMat = new THREE.MeshStandardMaterial({ color: 0xe4eff5, roughness: 1 });
+    const snowMat = new THREE.MeshStandardMaterial({ color: 0xe2ebf3, roughness: 1 });
     const barrelMats = [
       new THREE.MeshStandardMaterial({ color: 0x8a3b2a, roughness: 0.7, metalness: 0.4 }),
       new THREE.MeshStandardMaterial({ color: 0x3f5a4a, roughness: 0.7, metalness: 0.4 }),
@@ -393,39 +407,101 @@ export class Engine {
     ];
     const bagMat = new THREE.MeshStandardMaterial({ color: 0x8f8873, roughness: 1 });
 
+    // ---- outside: snowfield yard wrapped by a chain-link perimeter fence ----
+    const snowGroundMat = new THREE.MeshStandardMaterial({ map: snowGroundTexture(), roughness: 0.98, metalness: 0 });
+    snowGroundMat.map!.repeat.set(16, 12);
+    const yardGround = new THREE.Mesh(new THREE.PlaneGeometry(YARD_W * 2 + 8, YARD_D * 2 + 8), snowGroundMat);
+    yardGround.rotation.x = -Math.PI / 2;
+    yardGround.position.y = -0.02;
+    yardGround.receiveShadow = true;
+    this.scene.add(yardGround);
+
+    const chainMat = new THREE.MeshStandardMaterial({
+      map: chainLinkTexture(), transparent: true, alphaTest: 0.42, side: THREE.DoubleSide,
+      color: 0x8b99a2, roughness: 0.55, metalness: 0.75,
+    });
+    chainMat.map!.repeat.set(6, 1);
+    const postMat = new THREE.MeshStandardMaterial({ color: 0x39434b, roughness: 0.55, metalness: 0.7 });
+    const fenceH = 3.4;
+    const fenceSide = (len: number, x: number, z: number, rotY: number) => {
+      const grp = new THREE.Group();
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(len, fenceH), chainMat);
+      mesh.position.y = fenceH / 2 + 0.18;
+      grp.add(mesh);
+      for (const ry of [0.24, fenceH + 0.12]) {
+        const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, len, 6), postMat);
+        rail.rotation.z = Math.PI / 2;
+        rail.position.y = ry;
+        grp.add(rail);
+      }
+      const nPosts = Math.ceil(len / 7.8);
+      for (let i = 0; i <= nPosts; i++) {
+        const p = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, fenceH + 0.34, 6), postMat);
+        p.position.set(-len / 2 + (len / nPosts) * i, (fenceH + 0.34) / 2 - 0.05, 0);
+        p.castShadow = true;
+        grp.add(p);
+      }
+      grp.position.set(x, 0, z);
+      grp.rotation.y = rotY;
+      this.scene.add(grp);
+    };
+    fenceSide(YARD_W * 2, 0, -YARD_D, 0);
+    fenceSide(YARD_W * 2, 0, YARD_D, 0);
+    fenceSide(YARD_D * 2, -YARD_W, 0, Math.PI / 2);
+    fenceSide(YARD_D * 2, YARD_W, 0, Math.PI / 2);
+    // fence blocks movement but not bullets — colliders only, no hit meshes
+    this.colliderBoxes.push(
+      new THREE.Box3(new THREE.Vector3(-YARD_W, 0, -YARD_D - 0.15), new THREE.Vector3(YARD_W, fenceH, -YARD_D + 0.15)),
+      new THREE.Box3(new THREE.Vector3(-YARD_W, 0, YARD_D - 0.15), new THREE.Vector3(YARD_W, fenceH, YARD_D + 0.15)),
+      new THREE.Box3(new THREE.Vector3(-YARD_W - 0.15, 0, -YARD_D), new THREE.Vector3(-YARD_W + 0.15, fenceH, YARD_D)),
+      new THREE.Box3(new THREE.Vector3(YARD_W - 0.15, 0, -YARD_D), new THREE.Vector3(YARD_W + 0.15, fenceH, YARD_D)),
+    );
+    // wind-piled drifts against the fence line
+    const driftSpots: [number, number][] = [];
+    for (let i = 0; i < 8; i++) driftSpots.push([-YARD_W + 2 + Math.random() * (YARD_W * 2 - 4), -YARD_D + 1.1 + Math.random() * 1.5]);
+    for (let i = 0; i < 8; i++) driftSpots.push([-YARD_W + 2 + Math.random() * (YARD_W * 2 - 4), YARD_D - 1.1 - Math.random() * 1.5]);
+    for (let i = 0; i < 5; i++) driftSpots.push([-YARD_W + 1.1 + Math.random() * 1.5, -YARD_D + 2 + Math.random() * (YARD_D * 2 - 4)]);
+    for (let i = 0; i < 5; i++) driftSpots.push([YARD_W - 1.1 - Math.random() * 1.5, -YARD_D + 2 + Math.random() * (YARD_D * 2 - 4)]);
+    for (const [dx, dz] of driftSpots) {
+      const drift = new THREE.Mesh(new THREE.SphereGeometry(1.4 + Math.random() * 1.6, 10, 7), snowMat);
+      drift.scale.set(1.7, 0.3 + Math.random() * 0.14, 1);
+      drift.position.set(dx, 0.03, dz);
+      drift.rotation.y = Math.random() * 3;
+      this.scene.add(drift);
+    }
+
     const wallBox = (w: number, h: number, d: number, x: number, y: number, z: number) => {
       const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
       m.position.set(x, y, z);
       this.addSolid(m, 'wall');
     };
-    // perimeter with two breached gaps (north middle, south-east)
+    // warehouse shell with three passable openings: north breach, south loading bay, west vehicle gate
     wallBox(26, 7, 0.6, -19, 3.5, -HALF_D);
     wallBox(26, 7, 0.6, 19, 3.5, -HALF_D);
-    wallBox(0.6, 7, HALF_D * 2, -HALF_W, 3.5, 0);
-    wallBox(0.6, 7, HALF_D * 2, HALF_W, 3.5, 0);
+    wallBox(0.6, 7, HALF_D * 2, HALF_W, 3.5, 0); // east: solid
     wallBox(20, 7, 0.6, -22, 3.5, HALF_D);
     wallBox(28, 7, 0.6, 18, 3.5, HALF_D);
-    // rubble in the gaps (low cover, shoot-over-able)
+    wallBox(16, 2.2, 0.7, -4, 5.9, HALF_D); // header above the south loading bay
+    wallBox(0.6, 7, 17, -HALF_W, 3.5, -13.5);
+    wallBox(0.6, 7, 17, -HALF_W, 3.5, 13.5);
+    wallBox(0.7, 2.4, 10, -HALF_W, 5.8, 0); // header above the west vehicle gate
+    // rubble in the openings (low cover, shoot-over-able)
     const rubbleN = new THREE.Mesh(new THREE.BoxGeometry(12, 0.9, 1.4), concreteMat);
     rubbleN.position.set(0, 0.45, -HALF_D);
     this.addSolid(rubbleN, 'cover');
     const rubbleS = new THREE.Mesh(new THREE.BoxGeometry(8, 0.9, 1.4), concreteMat);
     rubbleS.position.set(-8, 0.45, HALF_D);
     this.addSolid(rubbleS, 'cover');
-    // snow drifts through the gaps
-    for (const [dx, dz] of [[-2, -20.5], [3, -19.5], [-9, 20.5], [-5, 21]]) {
-      const drift = new THREE.Mesh(new THREE.SphereGeometry(2.2, 12, 8), snowMat);
-      drift.scale.set(1.6, 0.35, 1);
-      drift.position.set(dx, 0.2, dz);
-      this.scene.add(drift);
+    const rubbleW = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.7, 3.2), concreteMat);
+    rubbleW.position.set(-HALF_W, 0.35, -3.3);
+    this.addSolid(rubbleW, 'cover');
+    // snow banks just outside the openings — the cold stays outdoors
+    for (const [dx, dz, sx] of [[0, -HALF_D - 1.6, 4.4], [-6, HALF_D + 1.5, 3.4], [-HALF_W - 1.6, 3.4, 2.6]] as [number, number, number][]) {
+      const bank = new THREE.Mesh(new THREE.SphereGeometry(1.6, 12, 8), snowMat);
+      bank.scale.set(sx / 1.6, 0.4, 1);
+      bank.position.set(dx, 0.15, dz);
+      this.scene.add(bank);
     }
-    // outside glow plane beyond north gap (blizzard light)
-    const glow = new THREE.Mesh(
-      new THREE.PlaneGeometry(14, 6),
-      new THREE.MeshBasicMaterial({ color: 0x9fc8dc, transparent: true, opacity: 0.5, fog: false }),
-    );
-    glow.position.set(0, 2.6, -HALF_D - 2.5);
-    this.scene.add(glow);
 
     // steel columns
     for (const cx of [-21, -7, 7, 21]) {
@@ -528,6 +604,66 @@ export class Engine {
     this.addSolid(bed, 'cover');
     this.addSolid(cab, 'cover');
 
+    // ---- yard: shipping containers, dead truck, crates and barriers in the snow ----
+    const contMatA = new THREE.MeshStandardMaterial({ map: wallTexture(), color: 0x7c4a38, roughness: 0.82, metalness: 0.45 });
+    contMatA.map!.repeat.set(4, 1.4);
+    const contMatB = new THREE.MeshStandardMaterial({ map: wallTexture(), color: 0x46545e, roughness: 0.82, metalness: 0.45 });
+    contMatB.map!.repeat.set(4, 1.4);
+    const contSpots: [number, number, number, THREE.Material, boolean][] = [
+      [-39, -13, 0.14, contMatA, false], [39, 9, -0.22, contMatB, false], [14, -30, 0.06, contMatB, true], [-38, 22, 0.4, contMatA, false],
+    ];
+    for (const [cx, cz, cr, cm, long] of contSpots) {
+      const cont = new THREE.Mesh(new THREE.BoxGeometry(long ? 2.5 : 6.1, 2.6, long ? 6.1 : 2.5), cm);
+      cont.position.set(cx, 1.3, cz);
+      cont.rotation.y = cr;
+      this.addSolid(cont, 'cover');
+      // snow cap on the roof
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(long ? 2.3 : 5.9, 0.16, long ? 5.9 : 2.3), snowMat);
+      cap.position.y = 1.38;
+      cont.add(cap);
+    }
+    // second wrecked truck, half-buried in the east yard
+    const truck2 = new THREE.Group();
+    const bed2 = new THREE.Mesh(new THREE.BoxGeometry(4.4, 2.1, 2.2), rustMat);
+    bed2.position.set(0, 1.05, 0);
+    bed2.castShadow = true;
+    truck2.add(bed2);
+    const cab2 = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.7, 2.1), new THREE.MeshStandardMaterial({ color: 0x3c4a52, roughness: 0.65, metalness: 0.5 }));
+    cab2.position.set(2.9, 0.9, 0);
+    cab2.castShadow = true;
+    truck2.add(cab2);
+    const cap2 = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.16, 2.0), snowMat);
+    cap2.position.set(0, 2.18, 0);
+    truck2.add(cap2);
+    truck2.position.set(38, -0.12, -18);
+    truck2.rotation.y = 2.35;
+    this.scene.add(truck2);
+    this.addSolid(bed2, 'cover');
+    this.addSolid(cab2, 'cover');
+    // yard crate stacks & barrel clusters
+    for (const [x, z, levels] of [[-36, 5, 2], [35, 25, 1], [-21, -30, 2], [24, -26, 1]] as [number, number, number][]) {
+      for (let l = 0; l < levels; l++) {
+        const c = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.3, 1.3), crateMat);
+        c.position.set(x + (l > 0 ? 0.08 : 0), 0.65 + l * 1.3, z);
+        c.rotation.y = 0.3 + l * 0.25;
+        this.addSolid(c, 'cover');
+      }
+    }
+    for (const [bx, bz] of [[-35, -23], [41, -4], [18, 32]] as [number, number][]) {
+      for (let i = 0; i < 3; i++) {
+        const b = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 1.05, 12), barrelMats[i % 3]);
+        b.position.set(bx + i * 0.95, i === 2 ? 0.43 : 0.53, bz + (i % 2) * 0.5);
+        if (i === 2) b.rotation.z = Math.PI / 2;
+        this.addSolid(b, 'cover');
+      }
+    }
+    for (const [x, z, rot] of [[-37, 1, 1.57], [1, -27, 0.2], [-6, 27, 0.1], [30, 30, 0.8]] as [number, number, number][]) {
+      const b = new THREE.Mesh(new THREE.BoxGeometry(2.6, 1.0, 0.55), concreteMat);
+      b.position.set(x, 0.5, z);
+      b.rotation.y = rot;
+      this.addSolid(b, 'cover');
+    }
+
     // ---- non-solid dressing: pallets, debris, pipes ----
     const woodMat = new THREE.MeshStandardMaterial({ color: 0x5d4a33, roughness: 0.95 });
     for (const [x, z, r] of [[4, 4, 0.4], [-9, -8, 1.2], [15, -14, 0.8], [-22, -14, 0.2], [11, 16, 1.5]]) {
@@ -553,45 +689,101 @@ export class Engine {
       this.scene.add(pipe);
     }
 
-    // ---- hanging emergency lamps ----
+    // ---- hanging tungsten work lamps: focused pools of light, one casts shadows ----
     const lampGeoHead = new THREE.BoxGeometry(0.5, 0.16, 0.3);
-    const lampMatGlow = new THREE.MeshStandardMaterial({ color: 0x30241a, emissive: 0xffa64d, emissiveIntensity: 2.4, roughness: 0.6 });
+    const lampMatGlow = new THREE.MeshStandardMaterial({ color: 0x30241a, emissive: 0xffc28a, emissiveIntensity: 1.5, roughness: 0.6 });
     const cordMat = new THREE.MeshStandardMaterial({ color: 0x11151a, roughness: 0.9 });
-    for (const [lx, lz, ly] of [[-14, -4, 4.6], [12, 6, 4.9], [1, -13, 5.1]] as [number, number, number][]) {
+    ([[-14, -4, 4.6], [12, 6, 4.9], [1, -13, 5.1]] as [number, number, number][]).forEach(([lx, lz, ly], idx) => {
       const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 7 - ly, 6), cordMat);
       cord.position.set(lx, (7 + ly) / 2, lz);
       this.scene.add(cord);
       const head = new THREE.Mesh(lampGeoHead, lampMatGlow);
       head.position.set(lx, ly, lz);
       this.scene.add(head);
-      const light = new THREE.PointLight(0xffa64d, 38, 22, 2);
-      light.position.set(lx, ly - 0.2, lz);
-      this.scene.add(light);
-      this.lamps.push({ light, base: 38, seed: lx * 7 + lz });
-    }
-    const cold = new THREE.PointLight(0xa8d8f0, 26, 30, 2);
-    cold.position.set(0, 3.6, -19);
-    this.scene.add(cold);
+      const spot = new THREE.SpotLight(0xffc28a, 210, 26, 1.02, 0.62, 2);
+      spot.position.set(lx, ly - 0.15, lz);
+      spot.target.position.set(lx + 0.4, 0, lz + 0.3);
+      this.scene.add(spot.target);
+      if (idx === 0) {
+        spot.castShadow = true;
+        spot.shadow.mapSize.set(512, 512);
+        spot.shadow.bias = -0.002;
+      }
+      this.scene.add(spot);
+      this.lamps.push({ light: spot, base: 210, seed: lx * 7 + lz });
+    });
+
+    // ---- moonlight spilling in through the north breach ----
+    const spill = new THREE.SpotLight(0x9fc4dd, 120, 46, 0.72, 0.75, 2);
+    spill.position.set(2, 6.5, -HALF_D - 9);
+    spill.target.position.set(0, 0, -9);
+    this.scene.add(spill.target);
+    this.scene.add(spill);
+
+    // ---- yard floodlight tower: cold wash over the snowfield ----
+    const tower = new THREE.Group();
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.17, 9.6, 8), postMat);
+    pole.position.y = 4.8;
+    pole.castShadow = true;
+    tower.add(pole);
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.12, 0.12), postMat);
+    arm.position.set(0.7, 9.45, 0);
+    tower.add(arm);
+    const floodHead = new THREE.Mesh(
+      new THREE.BoxGeometry(0.75, 0.3, 0.3),
+      new THREE.MeshStandardMaterial({ color: 0x2a3238, emissive: 0xd7e6f2, emissiveIntensity: 1.3, roughness: 0.5 }),
+    );
+    floodHead.position.set(1.35, 9.35, 0);
+    tower.add(floodHead);
+    tower.position.set(-41, 0, -31);
+    tower.rotation.y = 0.6;
+    this.scene.add(tower);
+    const flood = new THREE.SpotLight(0xcfe0ee, 2600, 110, 0.6, 0.55, 2);
+    flood.position.set(-40, 9.3, -30);
+    flood.target.position.set(-8, 0, -2);
+    this.scene.add(flood.target);
+    this.scene.add(flood);
+    this.lamps.push({ light: flood, base: 2600, seed: 91 });
   }
 
   private buildSnow() {
-    const N = 1400;
+    // the blizzard lives in the yard — not a flake falls inside the warehouse
+    const N = 2400;
     const posArr = new Float32Array(N * 3);
     this.snowVel = new Float32Array(N);
     for (let i = 0; i < N; i++) {
-      posArr[i * 3] = (Math.random() - 0.5) * 50;
-      posArr[i * 3 + 1] = Math.random() * 22;
-      posArr[i * 3 + 2] = (Math.random() - 0.5) * 50;
-      this.snowVel[i] = 1.6 + Math.random() * 2.4;
+      posArr[i * 3] = (Math.random() - 0.5) * YARD_W * 2;
+      posArr[i * 3 + 1] = Math.random() * 18;
+      posArr[i * 3 + 2] = (Math.random() - 0.5) * YARD_D * 2;
+      this.snowVel[i] = 1.8 + Math.random() * 2.6;
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
     const mat = new THREE.PointsMaterial({
-      color: 0xe8f4fa, size: 0.09, map: dotTexture(), transparent: true, opacity: 0.85,
+      color: 0xe8f4fa, size: 0.1, map: dotTexture(), transparent: true, opacity: 0.8,
       depthWrite: false, sizeAttenuation: true,
     });
     this.snow = new THREE.Points(geo, mat);
+    this.snow.frustumCulled = false;
     this.scene.add(this.snow);
+
+    // dust motes drifting in the depot air
+    const M = 260;
+    const mArr = new Float32Array(M * 3);
+    for (let i = 0; i < M; i++) {
+      mArr[i * 3] = (Math.random() - 0.5) * 16;
+      mArr[i * 3 + 1] = Math.random() * 6;
+      mArr[i * 3 + 2] = (Math.random() - 0.5) * 16;
+    }
+    const mGeo = new THREE.BufferGeometry();
+    mGeo.setAttribute('position', new THREE.BufferAttribute(mArr, 3));
+    const mMat = new THREE.PointsMaterial({
+      color: 0xbfd4e0, size: 0.035, map: dotTexture(), transparent: true, opacity: 0.32,
+      depthWrite: false, sizeAttenuation: true,
+    });
+    this.motes = new THREE.Points(mGeo, mMat);
+    this.motes.frustumCulled = false;
+    this.scene.add(this.motes);
   }
 
   private buildWeapons() {
@@ -817,8 +1009,9 @@ export class Engine {
 
   private spawnEnemy() {
     const anchors: [number, number][] = [
-      [-29, -17], [-29, 0], [-29, 16], [-20, -19], [-2, -19], [14, -19],
-      [29, -16], [29, 2], [29, 17], [18, 19], [-6, 19], [-24, 18],
+      [-43, -33], [-20, -33], [0, -33], [20, -33], [43, -33],
+      [-43, 0], [43, 0],
+      [-43, 33], [-20, 33], [0, 33], [20, 33], [43, 33],
     ];
     let best = anchors[Math.floor(Math.random() * anchors.length)];
     for (let tries = 0; tries < 6; tries++) {
@@ -1284,8 +1477,8 @@ export class Engine {
     };
     tryAxis('x', this.vel.x * dt);
     tryAxis('z', this.vel.z * dt);
-    this.pos.x = Math.max(-HALF_W + 0.9, Math.min(HALF_W - 0.9, this.pos.x));
-    this.pos.z = Math.max(-HALF_D + 0.9, Math.min(HALF_D - 0.9, this.pos.z));
+    this.pos.x = Math.max(-YARD_W + 0.9, Math.min(YARD_W - 0.9, this.pos.x));
+    this.pos.z = Math.max(-YARD_D + 0.9, Math.min(YARD_D - 0.9, this.pos.z));
 
     this.pos.y += this.vel.y * dt;
     if (this.pos.y <= EYE) {
@@ -1511,8 +1704,8 @@ export class Engine {
           nextZ = mz > 0 ? Math.min(nextZ, box.min.z - r) : Math.max(nextZ, box.max.z + r);
         }
       }
-      gp.x = Math.max(-HALF_W + 1, Math.min(HALF_W - 1, nextX));
-      gp.z = Math.max(-HALF_D + 1, Math.min(HALF_D - 1, nextZ));
+      gp.x = Math.max(-YARD_W + 1, Math.min(YARD_W - 1, nextX));
+      gp.z = Math.max(-YARD_D + 1, Math.min(YARD_D - 1, nextZ));
       e.model.group.rotation.y = Math.atan2(dx, dz);
 
       // --- skeletal animation ---
@@ -1547,8 +1740,8 @@ export class Engine {
         e.hurtT -= dt * 3.2;
         m.spine.rotation.x += e.hurtT * 0.38;
         m.head.rotation.x -= e.hurtT * 0.3;
-        gp.x = Math.max(-HALF_W + 1, Math.min(HALF_W - 1, gp.x + e.hurtX * e.hurtT * dt * 2.4));
-        gp.z = Math.max(-HALF_D + 1, Math.min(HALF_D - 1, gp.z + e.hurtZ * e.hurtT * dt * 2.4));
+        gp.x = Math.max(-YARD_W + 1, Math.min(YARD_W - 1, gp.x + e.hurtX * e.hurtT * dt * 2.4));
+        gp.z = Math.max(-YARD_D + 1, Math.min(YARD_D - 1, gp.z + e.hurtZ * e.hurtT * dt * 2.4));
       }
 
       // hit flash decay
@@ -1648,23 +1841,38 @@ export class Engine {
   }
 
   private updateAmbient(dt: number, t: number) {
-    // snow
+    // snow — fixed to the yard, wraps at the fence line
     const attr = this.snow.geometry.getAttribute('position') as THREE.BufferAttribute;
     const arr = attr.array as Float32Array;
-    const cx = this.camera.position.x;
-    const cz = this.camera.position.z;
     for (let i = 0; i < this.snowVel.length; i++) {
       arr[i * 3 + 1] -= this.snowVel[i] * dt;
       arr[i * 3] += (1.1 + Math.sin(t * 0.6 + i) * 0.5) * dt;
       if (arr[i * 3 + 1] < 0) {
-        arr[i * 3 + 1] = 20 + Math.random() * 2;
-        arr[i * 3] = (Math.random() - 0.5) * 50;
-        arr[i * 3 + 2] = (Math.random() - 0.5) * 50;
+        arr[i * 3 + 1] = 15 + Math.random() * 3;
+        arr[i * 3] = (Math.random() - 0.5) * YARD_W * 2;
+        arr[i * 3 + 2] = (Math.random() - 0.5) * YARD_D * 2;
       }
-      if (arr[i * 3] > 25) arr[i * 3] = -25;
+      if (arr[i * 3] > YARD_W) arr[i * 3] = -YARD_W;
+      if (arr[i * 3 + 2] > YARD_D) arr[i * 3 + 2] = -YARD_D;
+      else if (arr[i * 3 + 2] < -YARD_D) arr[i * 3 + 2] = YARD_D;
     }
     attr.needsUpdate = true;
-    this.snow.position.set(cx, 0, cz);
+
+    // dust motes follow the camera through the depot air
+    const mAttr = this.motes.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const mArr = mAttr.array as Float32Array;
+    for (let i = 0; i < mArr.length / 3; i++) {
+      mArr[i * 3] += Math.sin(t * 0.25 + i * 1.7) * dt * 0.12;
+      mArr[i * 3 + 1] += Math.cos(t * 0.18 + i) * dt * 0.05;
+      mArr[i * 3 + 2] += Math.cos(t * 0.22 + i * 2.3) * dt * 0.12;
+      for (let a = 0; a < 3; a++) {
+        const lim = a === 1 ? 6 : 8;
+        if (mArr[i * 3 + a] > lim) mArr[i * 3 + a] = -lim;
+        if (mArr[i * 3 + a] < -lim) mArr[i * 3 + a] = lim;
+      }
+    }
+    mAttr.needsUpdate = true;
+    this.motes.position.set(this.camera.position.x, 0, this.camera.position.z);
 
     // lamp flicker
     for (const l of this.lamps) {

@@ -46,17 +46,23 @@ export function floorTexture(): THREE.Texture {
       }
       g.stroke();
     }
-    // snow patches
-    for (let i = 0; i < 40; i++) {
+    // swept-clean patches (bare concrete where traffic has worn it)
+    for (let i = 0; i < 34; i++) {
       const x = Math.random() * w, y = Math.random() * h, r = rnd(14, 70);
       const gr = g.createRadialGradient(x, y, 1, x, y, r);
-      gr.addColorStop(0, 'rgba(228,240,246,0.85)');
-      gr.addColorStop(0.7, 'rgba(214,230,238,0.4)');
-      gr.addColorStop(1, 'rgba(214,230,238,0)');
+      gr.addColorStop(0, 'rgba(118,128,134,0.30)');
+      gr.addColorStop(1, 'rgba(118,128,134,0)');
       g.fillStyle = gr;
       g.beginPath();
       g.ellipse(x, y, r, r * rnd(0.5, 0.9), Math.random() * 3, 0, 7);
       g.fill();
+    }
+    // pale expansion-joint lines
+    g.strokeStyle = 'rgba(58,66,72,0.55)';
+    g.lineWidth = 2;
+    for (const f of [0.33, 0.66]) {
+      g.beginPath(); g.moveTo(0, h * f); g.lineTo(w, h * f); g.stroke();
+      g.beginPath(); g.moveTo(w * f, 0); g.lineTo(w * f, h); g.stroke();
     }
     // faded hazard stripe strip
     g.save();
@@ -225,6 +231,67 @@ export function flashTexture(): THREE.Texture {
       g.fill();
     }
     g.restore();
+  });
+}
+
+/** Wind-blown arctic snowfield: soft blue-white with drift banding and sparkle. */
+export function snowGroundTexture(): THREE.Texture {
+  return makeCanvas(512, 512, (g, w, h) => {
+    g.fillStyle = '#dfe8f0';
+    g.fillRect(0, 0, w, h);
+    // drift banding
+    for (let i = 0; i < 60; i++) {
+      const y = Math.random() * h;
+      const gr = g.createLinearGradient(0, y - rnd(6, 26), 0, y + rnd(6, 26));
+      const light = Math.random() > 0.5;
+      gr.addColorStop(0, 'rgba(0,0,0,0)');
+      gr.addColorStop(0.5, light ? 'rgba(246,250,253,0.5)' : 'rgba(172,190,205,0.4)');
+      gr.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = gr;
+      g.fillRect(0, y - 30, w, 60);
+    }
+    // fine grain
+    for (let i = 0; i < 2400; i++) {
+      g.fillStyle = Math.random() > 0.5 ? 'rgba(250,253,255,0.5)' : 'rgba(158,178,194,0.35)';
+      g.fillRect(Math.random() * w, Math.random() * h, 1.4, 1.4);
+    }
+    // ice sparkle
+    for (let i = 0; i < 260; i++) {
+      g.fillStyle = 'rgba(255,255,255,0.85)';
+      g.fillRect(Math.random() * w, Math.random() * h, 1, 1);
+    }
+    // tire ruts
+    g.strokeStyle = 'rgba(150,170,186,0.5)';
+    for (let r = 0; r < 3; r++) {
+      g.lineWidth = rnd(5, 9);
+      g.beginPath();
+      let x = Math.random() * w, y = 0;
+      g.moveTo(x, y);
+      while (y < h) { y += rnd(20, 44); x += rnd(-26, 26); g.lineTo(x, y); }
+      g.stroke();
+    }
+  });
+}
+
+/** Galvanized chain-link fence mesh (alpha). */
+export function chainLinkTexture(): THREE.Texture {
+  return makeCanvas(128, 128, (g, w, h) => {
+    g.clearRect(0, 0, w, h);
+    g.strokeStyle = 'rgba(205,216,224,0.95)';
+    g.lineWidth = 3.2;
+    g.lineCap = 'round';
+    const s = 16; // diamond pitch
+    for (let d = -h; d < w + h; d += s) {
+      g.beginPath(); g.moveTo(d, 0); g.lineTo(d + h, h); g.stroke();
+      g.beginPath(); g.moveTo(d + h, 0); g.lineTo(d, h); g.stroke();
+    }
+    // darker core pass for depth
+    g.strokeStyle = 'rgba(120,134,144,0.75)';
+    g.lineWidth = 1.2;
+    for (let d = -h; d < w + h; d += s) {
+      g.beginPath(); g.moveTo(d + 1, 0); g.lineTo(d + h + 1, h); g.stroke();
+      g.beginPath(); g.moveTo(d + h - 1, 0); g.lineTo(d - 1, h); g.stroke();
+    }
   });
 }
 

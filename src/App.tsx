@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Engine } from './game/engine';
 import type { EndStats, GameEvent, HudState } from './game/engine';
 
-const MENU_BG = 'https://image.qwenlm.ai/generated-images/1c805e54-4f16-4da6-8c13-d3c0cf599059/_result.png';
+const MENU_BG = 'https://image.qwenlm.ai/generated-images/1257f3b2-7150-473b-9d84-c30ad3b818bb/_result.png';
 
 const DEFAULT_HUD: HudState = {
   phase: 'menu',
@@ -333,7 +333,7 @@ export default function App() {
               <p className="mt-5 max-w-md text-[15px] font-medium leading-relaxed text-[#9cc3d2]">
                 Prudhoe Supply Depot, Alaska. The convoy never made it. A mercenary company has taken the warehouse
                 district and they are coming through the storm in <span className="font-bold text-[#bfeaf5]">endless waves</span>.
-                Hold the depot. Crate stacks, barriers and columns stop bullets — <span className="font-bold text-[#ffab3d]">use the cover</span>,
+                Fight spills into the <span className="font-bold text-[#bfeaf5]">fenced snow yard</span> through the gates. Crate stacks, barriers and columns stop bullets — <span className="font-bold text-[#ffab3d]">use the cover</span>,
                 aim for the red visors, and make every round count.
               </p>
 
