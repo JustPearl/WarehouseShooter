@@ -195,6 +195,14 @@ interface Enemy {
   hurtZ: number;
   role: 'rifle' | 'breacher' | 'marksman';
   rag: Ragdoll | null;
+  // pathfinding state (grid A* — routes around walls and cover instead of grinding into them)
+  path: number[]; // waypoint cell indices
+  pathI: number; // current waypoint cursor
+  pathT: number; // repath timer (staggered per enemy)
+  pathGoal: number; // player cell the path was built for
+  stuckT: number;
+  lastPX: number;
+  lastPZ: number;
 }
 
 /** Procedural ragdoll: spring-damper joints flopping to limp rests + a sliding, tipping torso. */
@@ -256,6 +264,7 @@ export class Engine {
   private simT = 0; // accumulated sim time in seconds (burst-gap detection)
   private lastDamageT = -99; // sim-time of last hit taken (drives out-of-combat regen)
   private shake = 0;
+  private sensMul = 1; // mouse sensitivity multiplier (settings)
   private grounded = true;
   private bobPhase = 0;
   private prevBobStep = 0;
@@ -282,6 +291,17 @@ export class Engine {
   // world
   private solidMeshes: THREE.Mesh[] = [];
   private colliderBoxes: THREE.Box3[] = [];
+
+  // navigation grid (coarse A* over the compound — enemies route around walls & cover)
+  private static readonly CELL = 1.6;
+  private pathCols = 0;
+  private pathRows = 0;
+  private pathBlocked!: Uint8Array;
+  private pfG!: Float32Array;
+  private pfF!: Float32Array;
+  private pfFrom!: Int32Array;
+  private pfClosed!: Uint8Array;
+  private astarBudget = 0; // max A* queries per frame (keeps wave spikes cheap)
   private lamps: { light: THREE.Light; base: number; seed: number }[] = [];
   private snow!: THREE.Points;
   private snowVel!: Float32Array;
@@ -344,11 +364,11 @@ export class Engine {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 0.92;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x070d13);
-    this.scene.fog = new THREE.FogExp2(0x0a121a, 0.012);
+    this.scene.background = new THREE.Color(0x04070c);
+    this.scene.fog = new THREE.FogExp2(0x08111c, 0.017);
 
     const pmrem = new THREE.PMREMGenerator(this.renderer);
     this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
@@ -360,6 +380,7 @@ export class Engine {
 
     this.buildLights();
     this.buildWorld();
+    this.buildPathGrid();
     this.buildSnow();
     this.buildWeapons();
     this.buildPools();
@@ -383,11 +404,11 @@ export class Engine {
 
   private buildLights() {
     // muted sky/ground ambient — the arctic night reads through shadow, not fill
-    const hemi = new THREE.HemisphereLight(0x46586a, 0x101316, 0.5);
+    const hemi = new THREE.HemisphereLight(0x33435a, 0x0b0f15, 0.42);
     this.scene.add(hemi);
 
-    // moon: cool, low-contrast key with soft shadows over the whole compound
-    const moon = new THREE.DirectionalLight(0x9fb9d4, 1.35);
+    // moon: cold, low-contrast key with soft shadows over the whole compound
+    const moon = new THREE.DirectionalLight(0x8fb0d8, 1.15);
     moon.position.set(30, 44, -26);
     moon.castShadow = true;
     moon.shadow.mapSize.set(2048, 2048);
@@ -403,7 +424,7 @@ export class Engine {
     this.scene.add(moon);
 
     // faint blue bounce off the snowfield, lifting outdoor shadows just enough
-    const bounce = new THREE.DirectionalLight(0x54687e, 0.35);
+    const bounce = new THREE.DirectionalLight(0x42546e, 0.28);
     bounce.position.set(-24, 10, 30);
     this.scene.add(bounce);
   }
@@ -824,7 +845,7 @@ export class Engine {
 
   private buildSnow() {
     // the blizzard lives in the yard — not a flake falls inside the warehouse
-    const N = 2400;
+    const N = 3000;
     const posArr = new Float32Array(N * 3);
     this.snowVel = new Float32Array(N);
     for (let i = 0; i < N; i++) {
@@ -936,7 +957,7 @@ export class Engine {
   };
   private onMouseMove = (e: MouseEvent) => {
     if (this.phase !== 'playing' || document.pointerLockElement !== this.canvas) return;
-    const sens = 0.0021 * (this.ads ? 0.6 : 1);
+    const sens = 0.0021 * this.sensMul * (this.ads ? 0.6 : 1);
     this.yaw -= e.movementX * sens;
     this.pitch = Math.max(-1.45, Math.min(1.45, this.pitch - e.movementY * sens));
     this.swayMX += e.movementX;
@@ -1050,6 +1071,10 @@ export class Engine {
     this.canvas.requestPointerLock();
   }
 
+  setSensitivity(mult: number) {
+    this.sensMul = Math.max(0.2, Math.min(3, mult));
+  }
+
   toMenu() {
     this.clearEntities();
     this.gunRig.visible = false;
@@ -1156,7 +1181,11 @@ export class Engine {
       skin, seed: Math.random() * 100, fireKick: 0, hurtT: 0, hurtX: 0, hurtZ: 0,
       role,
       rag: null,
+      path: [], pathI: 0, pathT: 0, pathGoal: -1,
+      stuckT: 0, lastPX: 0, lastPZ: 0,
     };
+    e.lastPX = model.group.position.x;
+    e.lastPZ = model.group.position.z;
     this.enemies.push(e);
     this.burst(model.group.position.clone().setY(0.1), 'snow', 10, 2.4, 3, 0.5);
   }
@@ -1565,6 +1594,7 @@ export class Engine {
   private tick(dt: number, t: number) {
     if (this.phase === 'playing') {
       this.simT += dt;
+      this.astarBudget = 3; // a few path queries per frame keeps wave-start spikes smooth
       this.updatePlayer(dt, t);
       this.updateWeapons(dt);
       this.updateEnemies(dt);
@@ -1799,6 +1829,111 @@ export class Engine {
     return [nx, nz];
   }
 
+  /* ------------------------------ pathfinding ------------------------------ */
+
+  private buildPathGrid() {
+    this.pathCols = Math.ceil((YARD_W * 2) / Engine.CELL);
+    this.pathRows = Math.ceil((YARD_D * 2) / Engine.CELL);
+    const n = this.pathCols * this.pathRows;
+    this.pathBlocked = new Uint8Array(n);
+    const inf = 0.55; // inflate solids so bodies don't scrape corners
+    for (const b of this.colliderBoxes) {
+      const x0 = Math.max(0, Math.floor((b.min.x - inf + YARD_W) / Engine.CELL));
+      const x1 = Math.min(this.pathCols - 1, Math.floor((b.max.x + inf + YARD_W) / Engine.CELL));
+      const z0 = Math.max(0, Math.floor((b.min.z - inf + YARD_D) / Engine.CELL));
+      const z1 = Math.min(this.pathRows - 1, Math.floor((b.max.z + inf + YARD_D) / Engine.CELL));
+      for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) this.pathBlocked[z * this.pathCols + x] = 1;
+    }
+    this.pfG = new Float32Array(n);
+    this.pfF = new Float32Array(n);
+    this.pfFrom = new Int32Array(n);
+    this.pfClosed = new Uint8Array(n);
+  }
+
+  private cellIndex(x: number, z: number): number {
+    const cx = Math.max(0, Math.min(this.pathCols - 1, Math.floor((x + YARD_W) / Engine.CELL)));
+    const cz = Math.max(0, Math.min(this.pathRows - 1, Math.floor((z + YARD_D) / Engine.CELL)));
+    return cz * this.pathCols + cx;
+  }
+  private cellX(i: number) { return ((i % this.pathCols) + 0.5) * Engine.CELL - YARD_W; }
+  private cellZ(i: number) { return (Math.floor(i / this.pathCols) + 0.5) * Engine.CELL - YARD_D; }
+
+  /** nearest walkable cell (expanding ring search) — spawn/player cells may sit on an edge */
+  private nearestOpen(i: number): number {
+    if (i < 0) return -1;
+    if (!this.pathBlocked[i]) return i;
+    const C = this.pathCols, R = this.pathRows;
+    const cx = i % C, cz = Math.floor(i / C);
+    for (let r = 1; r <= 4; r++) {
+      for (let z = -r; z <= r; z++) {
+        for (let x = -r; x <= r; x++) {
+          if (Math.max(Math.abs(x), Math.abs(z)) !== r) continue;
+          const nx = cx + x, nz = cz + z;
+          if (nx < 0 || nz < 0 || nx >= C || nz >= R) continue;
+          const ni = nz * C + nx;
+          if (!this.pathBlocked[ni]) return ni;
+        }
+      }
+    }
+    return -1;
+  }
+
+  private pfHeur(a: number, b: number) {
+    const C = this.pathCols;
+    const dx = Math.abs((a % C) - (b % C));
+    const dz = Math.abs(Math.floor(a / C) - Math.floor(b / C));
+    return dx + dz - 0.58 * Math.min(dx, dz); // octile distance
+  }
+
+  /** A* over the nav grid, 8-way, no corner cutting. Returns waypoint cell indices (start→goal). */
+  private findPath(sx: number, sz: number, tx: number, tz: number): number[] {
+    if (!this.pathBlocked) return [];
+    const C = this.pathCols, R = this.pathRows;
+    const start = this.nearestOpen(this.cellIndex(sx, sz));
+    const goal = this.nearestOpen(this.cellIndex(tx, tz));
+    if (start < 0 || goal < 0) return [];
+    if (start === goal) return [goal];
+    const g = this.pfG, f = this.pfF, from = this.pfFrom, closed = this.pfClosed;
+    g.fill(Infinity);
+    closed.fill(0);
+    from.fill(-1);
+    const open: number[] = [start];
+    g[start] = 0;
+    f[start] = this.pfHeur(start, goal);
+    const DX = [1, -1, 0, 0, 1, 1, -1, -1];
+    const DZ = [0, 0, 1, -1, 1, -1, 1, -1];
+    const COST = [1, 1, 1, 1, 1.42, 1.42, 1.42, 1.42];
+    let guard = 0;
+    while (open.length > 0 && guard++ < 5000) {
+      let bi = 0;
+      for (let i = 1; i < open.length; i++) if (f[open[i]] < f[open[bi]]) bi = i;
+      const cur = open.splice(bi, 1)[0];
+      if (cur === goal) {
+        const path: number[] = [];
+        let c = cur;
+        while (c !== -1) { path.push(c); c = from[c]; }
+        return path.reverse();
+      }
+      closed[cur] = 1;
+      const cx = cur % C, cz = Math.floor(cur / C);
+      for (let d = 0; d < 8; d++) {
+        const nx = cx + DX[d], nz = cz + DZ[d];
+        if (nx < 0 || nz < 0 || nx >= C || nz >= R) continue;
+        const ni = nz * C + nx;
+        if (this.pathBlocked[ni] || closed[ni]) continue;
+        if (d >= 4 && (this.pathBlocked[cz * C + nx] || this.pathBlocked[nz * C + cx])) continue;
+        const ng = g[cur] + COST[d];
+        if (ng < g[ni]) {
+          g[ni] = ng;
+          from[ni] = cur;
+          f[ni] = ng + this.pfHeur(ni, goal);
+          if (!open.includes(ni)) open.push(ni);
+        }
+      }
+    }
+    return [];
+  }
+
   private updateEnemies(dt: number) {
     const playerXZ = this.tmpV.set(this.pos.x, 0, this.pos.z);
     for (let i = this.enemies.length - 1; i >= 0; i--) {
@@ -1896,13 +2031,42 @@ export class Engine {
         e.strafeDir *= -1;
       }
 
-      // movement: hold preferred range, strafe, flank if no LOS
+      // --- pathfinding: route around walls/cover instead of grinding into them ---
+      const goalCell = this.cellIndex(this.pos.x, this.pos.z);
+      e.pathT -= dt;
+      const stale = e.path.length === 0 || e.pathI >= e.path.length || e.pathT <= 0 ||
+        (e.pathGoal >= 0 && Math.abs((e.pathGoal % this.pathCols) - (goalCell % this.pathCols)) +
+          Math.abs(Math.floor(e.pathGoal / this.pathCols) - Math.floor(goalCell / this.pathCols)) > 3);
+      if (stale && this.astarBudget > 0) {
+        this.astarBudget--;
+        e.path = this.findPath(gp.x, gp.z, this.pos.x, this.pos.z);
+        e.pathI = e.path.length > 1 ? 1 : 0;
+        e.pathGoal = goalCell;
+        e.pathT = 0.5 + Math.random() * 0.35;
+      }
+
       const nx = dx / (dist || 1), nz = dz / (dist || 1);
-      const approach = dist > e.prefDist + 1.5 ? 1 : dist < e.prefDist - 2 ? -0.7 : 0;
-      const strafeW = los ? 0.65 : 1.25;
-      let mx = nx * approach + -nz * e.strafeDir * strafeW;
-      let mz = nz * approach + nx * e.strafeDir * strafeW;
-      if (!los) { mx += nx * 0.7; mz += nz * 0.7; } // close in when blocked
+      // desired travel direction: follow the route, blend to the direct line when close & visible
+      let dirX = nx, dirZ = nz;
+      if (e.path.length > 0 && e.pathI < e.path.length) {
+        const wx = this.cellX(e.path[e.pathI]), wz = this.cellZ(e.path[e.pathI]);
+        const wdx = wx - gp.x, wdz = wz - gp.z;
+        const wd = Math.hypot(wdx, wdz);
+        if (wd < 1.15) e.pathI++;
+        else { dirX = wdx / wd; dirZ = wdz / wd; }
+      }
+      if (los && dist < 9) {
+        const b = 0.72;
+        dirX = dirX * (1 - b) + nx * b;
+        dirZ = dirZ * (1 - b) + nz * b;
+        const dl = Math.hypot(dirX, dirZ) || 1;
+        dirX /= dl; dirZ /= dl;
+      }
+
+      const approach = dist > e.prefDist + 1.5 ? 1 : dist < e.prefDist - 2 ? -0.7 : 0.15;
+      const strafeW = los ? 0.6 : 1.0;
+      let mx = dirX * approach + -nz * e.strafeDir * strafeW;
+      let mz = dirZ * approach + nx * e.strafeDir * strafeW;
       const ml = Math.hypot(mx, mz) || 1;
       mx = (mx / ml) * e.speed;
       mz = (mz / ml) * e.speed;
@@ -1925,6 +2089,14 @@ export class Engine {
       gp.x = Math.max(-YARD_W + 1, Math.min(YARD_W - 1, nx2));
       gp.z = Math.max(-YARD_D + 1, Math.min(YARD_D - 1, nz2));
       e.model.group.rotation.y = Math.atan2(dx, dz);
+
+      // stuck watchdog: if barely moving while it wants to, drop the route and repath next frame
+      e.stuckT += dt;
+      if (e.stuckT > 0.7) {
+        const moved = Math.hypot(gp.x - e.lastPX, gp.z - e.lastPZ);
+        if (moved < 0.4) { e.pathT = 0; e.path = []; }
+        e.lastPX = gp.x; e.lastPZ = gp.z; e.stuckT = 0;
+      }
 
       // --- skeletal animation ---
       const m = e.model;

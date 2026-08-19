@@ -55,6 +55,12 @@ const IconGear = () => (
 function loadXhair(): boolean {
   try { return localStorage.getItem('wp_xhair') !== '0'; } catch { return true; }
 }
+function loadSens(): number {
+  try {
+    const v = parseFloat(localStorage.getItem('wp_sens') || '');
+    return Number.isFinite(v) && v > 0 ? v : 1;
+  } catch { return 1; }
+}
 
 function SettingToggle({ label, desc, value, onToggle }: { label: string; desc: string; value: boolean; onToggle: () => void }) {
   return (
@@ -99,8 +105,10 @@ export default function App() {
   const [banner, setBanner] = useState<Banner | null>(null);
   const [toast, setToast] = useState<{ id: number; text: string } | null>(null);
   const [stats, setStats] = useState<EndStats | null>(null);
-  const [showSettings, setShowSettings] = useState(false);
+  const [menuView, setMenuView] = useState<'root' | 'manual' | 'settings'>('root');
+  const [manualSec, setManualSec] = useState('brief');
   const [crosshairOn, setCrosshairOn] = useState<boolean>(loadXhair);
+  const [sens, setSens] = useState<number>(loadSens);
   const toggleCrosshair = useCallback(() => {
     setCrosshairOn((v) => {
       const n = !v;
@@ -162,6 +170,10 @@ export default function App() {
   return (
     <div className="fixed inset-0 overflow-hidden bg-[#05090d] select-none">
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full cursor-none" />
+
+      {/* cold cinematic grade + film grain — always on for grit */}
+      <div className="fx-cold pointer-events-none absolute inset-0" />
+      <div className="fx-grain pointer-events-none absolute inset-0" />
 
       {/* ======================= IN-GAME HUD ======================= */}
       {playing && (
@@ -314,91 +326,223 @@ export default function App() {
 
       {/* ======================= MENU ======================= */}
       {hud.phase === 'menu' && (
-        <div className="absolute inset-0 overflow-y-auto">
+        <div className="absolute inset-0 overflow-hidden">
           <div className="fx-kenburns absolute inset-0 bg-cover bg-center" style={{ backgroundImage: `url(${MENU_BG})` }} />
           <div className="absolute inset-0 bg-[linear-gradient(100deg,rgba(4,9,13,0.94)_18%,rgba(4,9,13,0.72)_48%,rgba(4,9,13,0.45)_100%)]" />
           <div className="fx-vignette absolute inset-0" />
 
-          <div className="relative mx-auto flex min-h-full max-w-6xl flex-col justify-center gap-10 px-8 py-10 lg:flex-row lg:items-center lg:gap-16">
-            {/* left: briefing */}
-            <div className="fx-rise max-w-xl">
-              <div className="mb-3 flex items-center gap-3 text-[11px] font-bold tracking-[0.4em] text-[#ff5c33]">
-                <span className="inline-block h-[8px] w-[8px] animate-pulse bg-[#ff5c33]" />
-                LIVE FIRE AUTHORIZED — 64.83°N 147.71°W
-              </div>
-              <h1 className="font-display leading-[0.9]">
-                <span className="block text-6xl text-[#bfeaf5] md:text-7xl" style={{ textShadow: '0 0 34px rgba(140,210,235,0.35)' }}>WHITEOUT</span>
-                <span className="block text-4xl text-[#ffab3d] md:text-5xl">PROTOCOL<span className="text-[#bfeaf5]">_</span></span>
-              </h1>
-              <p className="mt-5 max-w-md text-[15px] font-medium leading-relaxed text-[#9cc3d2]">
-                Prudhoe Supply Depot, Alaska. The convoy never made it. A mercenary company has taken the warehouse
-                district and they are coming through the storm in <span className="font-bold text-[#bfeaf5]">endless waves</span>.
-                Fight spills into the <span className="font-bold text-[#bfeaf5]">fenced snow yard</span> through the gates. Crate stacks, barriers and columns stop bullets — <span className="font-bold text-[#ffab3d]">use the cover</span>,
-                aim for the red visors, and make every round count.
-              </p>
-
-              {/* controls */}
-              <div className="hud-plate mt-6 grid max-w-md grid-cols-2 gap-x-6 gap-y-1.5 px-5 py-4 text-[12px] font-semibold tracking-[0.12em] text-[#9cc3d2]">
-                {[
-                  ['W A S D', 'MOVE'], ['MOUSE', 'AIM — CURSOR LOCKS'],
-                  ['LMB', 'FIRE'], ['RMB', 'AIM DOWN SIGHTS'],
-                  ['R', 'RELOAD'], ['1 / 2 / WHEEL', 'SWAP WEAPON'],
-                  ['V', 'FIRE MODE — AUTO/BURST'], ['F', 'MELEE STOCK-STRIKE'],
-                  ['SHIFT', 'SPRINT'], ['SPACE', 'JUMP'], ['ESC', 'PAUSE'],
-                  ['5S CLEAR', 'VITALS RESTORE'],
-                ].map(([k, v]) => (
-                  <div key={k} className="flex items-baseline justify-between gap-3 border-b border-[rgba(127,183,201,0.12)] py-1">
-                    <span className="font-display text-[11px] text-[#ffab3d]">{k}</span>
-                    <span>{v}</span>
+          {/* ---------- ROOT: minimal start ---------- */}
+          {menuView === 'root' && (
+            <div className="fx-rise relative flex h-full flex-col justify-between px-8 py-7 md:px-14 md:py-9">
+              <div className="flex items-start justify-between">
+                <div>
+                  <div className="flex items-center gap-3 text-[11px] font-bold tracking-[0.4em] text-[#ff5c33]">
+                    <span className="inline-block h-[8px] w-[8px] animate-pulse bg-[#ff5c33]" />
+                    LIVE FIRE AUTHORIZED — 64.83°N 147.71°W
                   </div>
-                ))}
-              </div>
-
-              {/* threat intel */}
-              <div className="hud-plate mt-4 max-w-md px-5 py-4">
-                <div className="text-[10px] font-bold tracking-[0.3em] text-[#7fb7c9]">THREAT INTEL — READ THE SHOULDER LAMP</div>
-                <div className="mt-2.5 space-y-2 text-[12px] font-medium leading-snug text-[#9cc3d2]">
-                  <div className="flex items-center gap-2.5">
-                    <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#3a4750]" />
-                    <span><span className="font-bold text-[#bfeaf5]">RIFLEMAN</span> — standard. Holds mid-range, fires bursts.</span>
-                  </div>
-                  <div className="flex items-center gap-2.5">
-                    <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#ff8b2a] shadow-[0_0_8px_#ff8b2a]" />
-                    <span><span className="font-bold text-[#ffab3d]">BREACHER</span> — shotgun. Sprints in close, hits hard. Keep distance or burst it down.</span>
-                  </div>
-                  <div className="flex items-center gap-2.5">
-                    <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#55d7ff] shadow-[0_0_8px_#55d7ff]" />
-                    <span><span className="font-bold text-[#bfeaf5]">MARKSMAN</span> — precise long-range crack. Punishes you in the open. Close the gap.</span>
-                  </div>
+                  <div className="mt-2 h-[3px] w-16 bg-[#ffab3d]" />
+                </div>
+                <div className="text-right text-[9px] font-bold leading-relaxed tracking-[0.3em] text-[rgba(127,183,201,0.6)]">
+                  ARCTIC OPS COMMAND<br />BUILD 2.6 // SECTOR 7
                 </div>
               </div>
 
-              <div className="relative mt-7 flex items-center gap-5">
-                <button className="btn-mil text-lg" onClick={() => { setShowSettings(false); start(); }}>DEPLOY ▸</button>
-                <button
-                  className="btn-ghost flex items-center gap-2 text-xs"
-                  style={showSettings ? { borderColor: '#ffab3d', color: '#ffab3d' } : undefined}
-                  onClick={() => setShowSettings((s) => !s)}
-                >
-                  <IconGear /> SETTINGS
-                </button>
-                <span className="text-[11px] font-semibold tracking-[0.22em] text-[#7fb7c9]">MOUSE + KEYBOARD REQUIRED</span>
+              <div className="max-w-2xl">
+                <h1 className="font-display leading-[0.9]">
+                  <span className="block text-7xl text-[#bfeaf5] md:text-8xl" style={{ textShadow: '0 0 44px rgba(120,190,220,0.3)' }}>WHITEOUT</span>
+                  <span className="block text-5xl text-[#ffab3d] md:text-6xl">PROTOCOL<span className="fx-blink text-[#bfeaf5]">_</span></span>
+                </h1>
+                <p className="mt-5 text-[13px] font-semibold tracking-[0.34em] text-[#7fb7c9]">
+                  HOLD THE DEPOT. OUTLAST THE STORM.
+                </p>
 
-                {showSettings && (
-                  <div className="fx-rise hud-plate absolute left-0 top-[calc(100%+12px)] z-20 w-80 px-5 py-4">
-                    <div className="flex items-baseline justify-between">
-                      <span className="font-display text-sm text-[#bfeaf5]">FIELD SETTINGS</span>
-                      <span className="text-[9px] font-bold tracking-[0.3em] text-[#7fb7c9]">SAVED LOCALLY</span>
-                    </div>
-                    <div className="mt-1 border-t border-[rgba(127,183,201,0.15)]">
-                      <SettingToggle label="CROSSHAIR" desc="ON-SCREEN RETICLE OVERLAY" value={crosshairOn} onToggle={toggleCrosshair} />
-                    </div>
-                    <div className="mt-1 border-t border-[rgba(127,183,201,0.15)] pt-2 text-[10px] font-semibold tracking-[0.16em] text-[#7fb7c9]">
-                      <span className="text-[#ff5c33]">TIP //</span> NO RETICLE? SHORT BURSTS, TRUST THE TRACERS.
-                    </div>
-                  </div>
-                )}
+                <div className="mt-10 flex flex-wrap items-center gap-4">
+                  <button className="btn-mil px-14 py-4 text-xl" onClick={start}>DEPLOY ▸</button>
+                  <button className="btn-ghost flex items-center gap-2 text-xs" onClick={() => setMenuView('manual')}>
+                    FIELD MANUAL
+                  </button>
+                  <button className="btn-ghost flex items-center gap-2 text-xs" onClick={() => setMenuView('settings')}>
+                    <IconGear /> SETTINGS
+                  </button>
+                </div>
               </div>
+
+              <div className="flex items-end justify-between text-[9px] font-bold tracking-[0.28em] text-[rgba(127,183,201,0.55)]">
+                <span>MOUSE + KEYBOARD REQUIRED — CURSOR LOCKS ON DEPLOY</span>
+                <span>-34°C // WIND 40KN // VIS 200M</span>
+              </div>
+            </div>
+          )}
+
+          {/* ---------- FIELD MANUAL: all intel in one dedicated dossier ---------- */}
+          {menuView === 'manual' && (
+            <div className="fx-rise absolute inset-0 flex flex-col bg-[rgba(3,8,12,0.93)]">
+              <div className="flex items-center justify-between border-b border-[rgba(127,183,201,0.18)] px-8 py-4 md:px-14">
+                <div>
+                  <div className="text-[10px] font-bold tracking-[0.4em] text-[#7fb7c9]">OPERATION WHITEOUT</div>
+                  <h2 className="font-display text-3xl text-[#bfeaf5]">FIELD MANUAL</h2>
+                </div>
+                <button className="btn-ghost text-xs" onClick={() => setMenuView('root')}>◂ BACK</button>
+              </div>
+
+              <div className="flex min-h-0 flex-1">
+                {/* rail */}
+                <div className="hidden w-52 shrink-0 flex-col gap-1 border-r border-[rgba(127,183,201,0.14)] px-6 py-6 md:flex">
+                  {([['brief', '01', 'SITUATION'], ['controls', '02', 'CONTROLS'], ['armory', '03', 'ARMORY'], ['threats', '04', 'THREAT INTEL']] as [string, string, string][]).map(([id, num, label]) => (
+                    <button
+                      key={id}
+                      onClick={() => {
+                        setManualSec(id);
+                        document.getElementById(`fm-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }}
+                      className={`flex items-baseline gap-3 px-3 py-2 text-left text-[12px] font-bold tracking-[0.22em] transition-colors ${manualSec === id ? 'bg-[rgba(255,171,61,0.12)] text-[#ffab3d]' : 'text-[#7fb7c9] hover:bg-[rgba(127,183,201,0.08)] hover:text-[#bfeaf5]'}`}
+                    >
+                      <span className="font-display text-[11px]">{num}</span>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* dossier */}
+                <div className="min-w-0 flex-1 overflow-y-auto px-8 py-6 md:px-12">
+                  <section id="fm-brief" className="max-w-2xl scroll-mt-4">
+                    <div className="text-[10px] font-bold tracking-[0.4em] text-[#ffab3d]">01 // SITUATION</div>
+                    <p className="mt-3 text-[15px] font-medium leading-relaxed text-[#9cc3d2]">
+                      Prudhoe Supply Depot, Alaska. The convoy never made it. A mercenary company has taken the warehouse
+                      district and they are coming through the storm in <span className="font-bold text-[#bfeaf5]">endless waves</span>.
+                      The fight spills into the <span className="font-bold text-[#bfeaf5]">fenced snow yard</span> through the gates.
+                      Crate stacks, barriers and columns stop bullets — <span className="font-bold text-[#ffab3d]">use the cover</span>,
+                      aim for the red visors, and make every round count. Hostiles now route around the depot with
+                      <span className="font-bold text-[#bfeaf5]"> real pathfinding</span> — they will flank, not stall.
+                    </p>
+                    <div className="mt-4 border-l-2 border-[#ff5c33] pl-4 text-[12px] font-semibold tracking-[0.14em] text-[#7fb7c9]">
+                      WAVES SCALE IN NUMBER AND ARMOR. HEADSHOTS PAY +75. SUPPLY CRATES DROP FROM HOSTILES. 5S CLEAR = VITALS RESTORE.
+                    </div>
+                  </section>
+
+                  <section id="fm-controls" className="mt-10 max-w-2xl scroll-mt-4">
+                    <div className="text-[10px] font-bold tracking-[0.4em] text-[#ffab3d]">02 // CONTROLS</div>
+                    <div className="hud-plate mt-4 grid grid-cols-1 gap-x-8 gap-y-1.5 px-5 py-4 text-[12px] font-semibold tracking-[0.12em] text-[#9cc3d2] sm:grid-cols-2">
+                      {([['W A S D', 'MOVE'], ['MOUSE', 'AIM — CURSOR LOCKS'], ['LMB', 'FIRE'], ['RMB', 'AIM DOWN SIGHTS'], ['R', 'RELOAD'], ['1 / 2 / WHEEL', 'SWAP WEAPON'], ['V', 'FIRE MODE — AUTO/BURST'], ['F', 'MELEE STOCK-STRIKE'], ['SHIFT', 'SPRINT'], ['SPACE', 'JUMP'], ['ESC', 'PAUSE'], ['5S CLEAR', 'VITALS RESTORE']] as [string, string][]).map(([k, v]) => (
+                        <div key={k} className="flex items-baseline justify-between gap-3 border-b border-[rgba(127,183,201,0.12)] py-1.5">
+                          <span className="font-display text-[11px] text-[#ffab3d]">{k}</span>
+                          <span>{v}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section id="fm-armory" className="mt-10 max-w-2xl scroll-mt-4">
+                    <div className="text-[10px] font-bold tracking-[0.4em] text-[#ffab3d]">03 // ARMORY</div>
+                    {ARMORY.map((a) => (
+                      <div key={a.name} className="hud-plate mt-4 px-5 py-4">
+                        <div className="flex items-baseline justify-between">
+                          <span className="font-display text-lg text-[#ffab3d]">{a.name}</span>
+                          <span className="text-[10px] font-bold tracking-[0.25em] text-[#7fb7c9]">{a.mode}</span>
+                        </div>
+                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                          {a.spec.map((s) => (
+                            <span key={s} className="border border-[rgba(127,183,201,0.28)] px-1.5 py-[2px] text-[9px] font-bold tracking-[0.16em] text-[#9cc3d2]">{s}</span>
+                          ))}
+                        </div>
+                        <p className="mt-1.5 text-[12px] font-medium text-[#7fb7c9]">{a.desc}</p>
+                        <div className="mt-2 flex items-center gap-2 text-[9px] font-bold tracking-[0.18em]">
+                          <span className="text-[#ff5c33]">RECOIL</span>
+                          <span className="h-px flex-1 bg-[rgba(127,183,201,0.18)]" />
+                          <span className="text-[#bfeaf5]">{a.recoil}</span>
+                        </div>
+                        <div className="mt-2.5 space-y-1.5">
+                          {a.stats.map(([label, v, amber]) => (
+                            <div key={label} className="flex items-center gap-3">
+                              <span className="w-9 text-[10px] font-bold tracking-[0.2em] text-[#7fb7c9]">{label}</span>
+                              <div className={`stat-bar flex-1 ${amber ? 'amber' : ''}`}><i style={{ width: `${v}%` }} /></div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </section>
+
+                  <section id="fm-threats" className="mt-10 max-w-2xl scroll-mt-4 pb-10">
+                    <div className="text-[10px] font-bold tracking-[0.4em] text-[#ffab3d]">04 // THREAT INTEL — READ THE SHOULDER LAMP</div>
+                    <div className="hud-plate mt-4 space-y-3 px-5 py-4 text-[12px] font-medium leading-snug text-[#9cc3d2]">
+                      <div className="flex items-center gap-2.5">
+                        <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#3a4750]" />
+                        <span><span className="font-bold text-[#bfeaf5]">RIFLEMAN</span> — standard. Holds mid-range, fires bursts.</span>
+                      </div>
+                      <div className="flex items-center gap-2.5">
+                        <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#ff8b2a] shadow-[0_0_8px_#ff8b2a]" />
+                        <span><span className="font-bold text-[#ffab3d]">BREACHER</span> — shotgun. Sprints in close, hits hard. Keep distance or burst it down.</span>
+                      </div>
+                      <div className="flex items-center gap-2.5">
+                        <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-[#55d7ff] shadow-[0_0_8px_#55d7ff]" />
+                        <span><span className="font-bold text-[#bfeaf5]">MARKSMAN</span> — precise long-range crack. Punishes you in the open. Close the gap.</span>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ---------- SETTINGS ---------- */}
+          {menuView === 'settings' && (
+            <div className="fx-rise absolute inset-0 flex items-center justify-center bg-[rgba(3,8,12,0.9)] px-6">
+              <div className="hud-plate w-full max-w-md px-7 py-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-[10px] font-bold tracking-[0.4em] text-[#7fb7c9]">SYSTEMS</div>
+                    <h2 className="font-display text-3xl text-[#bfeaf5]">SETTINGS</h2>
+                  </div>
+                  <button className="btn-ghost text-xs" onClick={() => setMenuView('root')}>◂ BACK</button>
+                </div>
+
+                <div className="mt-3 border-t border-[rgba(127,183,201,0.15)]">
+                  <SettingToggle label="CROSSHAIR" desc="ON-SCREEN RETICLE OVERLAY" value={crosshairOn} onToggle={toggleCrosshair} />
+                </div>
+
+                <div className="mt-2 border-t border-[rgba(127,183,201,0.15)] pt-4">
+                  <div className="flex items-baseline justify-between">
+                    <div>
+                      <div className="text-[12px] font-bold tracking-[0.22em] text-[#bfeaf5]">MOUSE SENSITIVITY</div>
+                      <div className="text-[10px] font-medium tracking-[0.14em] text-[#7fb7c9]">AIM SPEED MULTIPLIER</div>
+                    </div>
+                    <span className="font-display text-lg text-[#ffab3d]">{sens.toFixed(2)}×</span>
+                  </div>
+                  <input
+                    type="range"
+                    className="sens mt-3"
+                    min={0.3}
+                    max={2.5}
+                    step={0.05}
+                    value={sens}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      setSens(v);
+                      try { localStorage.setItem('wp_sens', String(v)); } catch { /* ignore */ }
+                      engineRef.current?.setSensitivity(v);
+                    }}
+                  />
+                  <div className="mt-1 flex justify-between text-[9px] font-bold tracking-[0.2em] text-[#7fb7c9]">
+                    <span>STEADY 0.3×</span><span>DEFAULT 1.0×</span><span>QUICK 2.5×</span>
+                  </div>
+                </div>
+
+                <div className="mt-4 border-t border-[rgba(127,183,201,0.15)] pt-3 text-[10px] font-semibold tracking-[0.16em] text-[#7fb7c9]">
+                  <span className="text-[#ff5c33]">TIP //</span> SETTINGS SAVE LOCALLY AND APPLY MID-OPERATION.
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* (legacy inline briefing + armory moved into the Field Manual) */}
+          <div className="hidden">
+            <div className="hidden">
+
+
+
+
+
             </div>
 
             {/* right: armory */}
