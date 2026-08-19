@@ -90,6 +90,125 @@ interface RecoilModel {
   rollAmp: number; // cosmetic viewmodel torque (never rolls the camera)
 }
 
+/**
+ * Attachment modifiers — each attachment is a bag of multipliers with honest
+ * drawbacks (nothing is a pure buff). Neutral = every factor 1.
+ */
+export interface WeaponMods {
+  dmg: number;      // projectile damage
+  vert: number;     // vertical recoil pattern scale
+  horiz: number;    // horizontal recoil pattern scale
+  spread: number;   // base dispersion
+  bloom: number;    // heat bloom
+  move: number;     // movement penalty
+  reload: number;   // reload time scale
+  fire: number;     // fire delay scale
+  adsSpeed: number; // ADS raise speed
+  adsErr: number;   // ADS recovery-lag error scale
+  adsBloom: number; // ADS dispersion scale
+  recov: number;    // recoil recovery speed
+  noise: number;    // shot-to-shot variance
+  flash: number;    // muzzle flash scale
+  magAdd: number;   // extra rounds per magazine
+  laser: boolean;   // tightens the hip-fire cone only
+  suppressed: boolean;
+}
+const NEUTRAL: WeaponMods = {
+  dmg: 1, vert: 1, horiz: 1, spread: 1, bloom: 1, move: 1, reload: 1, fire: 1,
+  adsSpeed: 1, adsErr: 1, adsBloom: 1, recov: 1, noise: 1, flash: 1,
+  magAdd: 0, laser: false, suppressed: false,
+};
+
+/** id -> modifiers. magAdd is resolved per-weapon where it differs. */
+const ATT_MODS: Record<string, Partial<WeaponMods>> = {
+  supp:  { vert: 0.88, horiz: 0.95, dmg: 0.92, flash: 0.4, adsSpeed: 0.9, suppressed: true },
+  comp:  { vert: 0.75, spread: 1.3, flash: 1.4 },
+  xmag:  { reload: 1.25, move: 1.12 },
+  laser: { bloom: 0.55, move: 0.5, vert: 1.05, horiz: 1.08, laser: true },
+  vgrip: { vert: 0.78, move: 1.22, adsSpeed: 0.88 },
+  rdot:  { adsErr: 0.7, adsBloom: 0.8, adsSpeed: 1.18, spread: 1.12 },
+  match: { fire: 0.88, recov: 1.3, noise: 1.35 },
+  lslide:{ adsErr: 0.85, vert: 0.92, adsSpeed: 0.88, move: 1.1 },
+};
+const ATT_MAGADD: Record<string, [number, number]> = { xmag: [4, 10] }; // [pistol, smg]
+
+/* ---------- visual attachment meshes (hidden until equipped) ---------- */
+const attSteel = new THREE.MeshStandardMaterial({ color: 0x2c3238, metalness: 0.7, roughness: 0.42 });
+const attDark = new THREE.MeshStandardMaterial({ color: 0x1a1f24, metalness: 0.4, roughness: 0.7 });
+const attPoly = new THREE.MeshStandardMaterial({ color: 0x1c2126, metalness: 0.15, roughness: 0.8 });
+const attAmber = new THREE.MeshStandardMaterial({ color: 0xff9a3c, emissive: 0xff7a1a, emissiveIntensity: 0.7 });
+const attBeamMat = new THREE.MeshBasicMaterial({
+  color: 0x8dffb0, transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false,
+});
+function attBox(w: number, h: number, d: number, mat: THREE.Material, x: number, y: number, z: number, rx = 0): THREE.Mesh {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  m.position.set(x, y, z);
+  if (rx) m.rotation.x = rx;
+  m.castShadow = true;
+  return m;
+}
+function attCyl(r: number, len: number, mat: THREE.Material, x: number, y: number, z: number): THREE.Mesh {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 12), mat);
+  m.rotation.x = Math.PI / 2;
+  m.position.set(x, y, z);
+  m.castShadow = true;
+  return m;
+}
+function laserBeam(y: number): THREE.Mesh {
+  const b = new THREE.Mesh(new THREE.BoxGeometry(0.0016, 0.0016, 2.2), attBeamMat);
+  b.position.set(0, y, -1.24);
+  return b;
+}
+function buildAttNodes(model: WeaponModel, wi: number): Record<string, THREE.Object3D> {
+  const g = model.group;
+  const out: Record<string, THREE.Object3D> = {};
+  const put = (id: string, ...ms: THREE.Object3D[]) => {
+    const grp = new THREE.Group();
+    ms.forEach((m) => grp.add(m));
+    grp.visible = false;
+    g.add(grp);
+    out[id] = grp;
+  };
+  if (wi === 0) {
+    // KODIAK .45 (muzzle at z=-0.22, bore y=0)
+    const suppG = new THREE.Group();
+    suppG.add(attCyl(0.0185, 0.10, attDark, 0, 0, -0.255));
+    suppG.add(attCyl(0.0195, 0.012, attSteel, 0, 0, -0.21));
+    put('supp', suppG);
+    const compG = new THREE.Group();
+    compG.add(attCyl(0.016, 0.055, attSteel, 0, 0, -0.235));
+    compG.add(attBox(0.034, 0.014, 0.01, attDark, 0, 0.011, -0.235));
+    compG.add(attBox(0.034, 0.014, 0.01, attDark, 0, 0.011, -0.255));
+    put('comp', compG);
+    put('xmag', attBox(0.052, 0.05, 0.05, attPoly, 0, -0.222, 0.072, 0.3), attBox(0.054, 0.012, 0.052, attAmber, 0, -0.248, 0.08, 0.3));
+    put('laser', attBox(0.02, 0.026, 0.055, attDark, 0, -0.055, -0.115), attBox(0.008, 0.008, 0.008, attAmber, 0, -0.055, -0.145), laserBeam(-0.055));
+    put('match', attBox(0.009, 0.036, 0.01, attAmber, 0, -0.076, -0.041));
+    put('lslide', attBox(0.056, 0.058, 0.078, attSteel, 0, 0.001, -0.205), attCyl(0.012, 0.05, attDark, 0, 0.004, -0.25));
+  } else {
+    // PTARMIGAN M9 (bore y=+0.002, handguard z -0.107..-0.282, muzzle z=-0.42)
+    const suppG = new THREE.Group();
+    suppG.add(attCyl(0.021, 0.13, attDark, 0, 0.002, -0.42));
+    suppG.add(attCyl(0.022, 0.014, attSteel, 0, 0.002, -0.36));
+    put('supp', suppG);
+    const compG = new THREE.Group();
+    compG.add(attCyl(0.0175, 0.06, attSteel, 0, 0.002, -0.40));
+    compG.add(attBox(0.038, 0.014, 0.012, attDark, 0, 0.015, -0.39));
+    compG.add(attBox(0.038, 0.014, 0.012, attDark, 0, 0.015, -0.415));
+    put('comp', compG);
+    put('xmag', attBox(0.052, 0.09, 0.06, attPoly, 0, -0.288, -0.058, -0.12), attBox(0.054, 0.014, 0.062, attAmber, 0, -0.33, -0.063, -0.12));
+    put('laser', attBox(0.022, 0.028, 0.06, attDark, 0, -0.035, -0.22), attBox(0.008, 0.008, 0.008, attAmber, 0, -0.035, -0.252), laserBeam(-0.035));
+    put('vgrip', attBox(0.03, 0.095, 0.042, attPoly, 0, -0.068, -0.19, 0.15), attBox(0.032, 0.012, 0.044, attDark, 0, -0.104, -0.185, 0.15));
+    const rdotG = new THREE.Group();
+    rdotG.add(attBox(0.03, 0.034, 0.05, attPoly, 0, 0.068, -0.015));
+    rdotG.add(attBox(0.024, 0.026, 0.004, new THREE.MeshStandardMaterial({ color: 0x0d1114, metalness: 0.2, roughness: 0.2 }), 0, 0.07, -0.04));
+    const rdot = new THREE.Mesh(new THREE.SphereGeometry(0.003, 8, 8), new THREE.MeshStandardMaterial({ color: 0xff3b30, emissive: 0xff2015, emissiveIntensity: 2.2 }));
+    rdot.position.set(0, 0.07, -0.038);
+    rdotG.add(rdot);
+    put('rdot', rdotG);
+  }
+  return out;
+}
+
 interface WeaponCfg {
   id: string;
   name: string;
@@ -161,6 +280,9 @@ interface WeaponRt {
   kickV: number;
   kickVis: number; // low-passed kickV -> muzzle flip ramps in instead of slamming
   kickVar: number; // per-shot flip magnitude (0.85..1.25)
+  mod: WeaponMods; // live attachment modifiers
+  attNodes: Record<string, THREE.Object3D>; // visual attachment meshes, toggled by loadout
+  flashBase: number; // unscaled muzzle-flash sprite size
   aimJitX: number; // random dispersion baked into the gun's orientation (rad) — honest spread
   aimJitY: number; // random dispersion (yaw)
   echoT: number; // delayed mechanical echo — visual only (-1 idle)
@@ -895,13 +1017,16 @@ export class Engine {
       model.group.position.copy(cfg.hip);
       model.group.visible = i === 0;
       this.gunRig.add(model.group);
-      this.weapons.push({
+      const attNodes = buildAttNodes(model, i);
+      const w: WeaponRt = {
         cfg, model, mag: cfg.magSize, reserve: cfg.startReserve,
         cooldown: 0, heat: 0, reloadT: -1, kickV: 0, kickVis: 0, kickVar: 1,
         aimJitX: 0, aimJitY: 0, echoT: -1, echoMag: 0,
         burstAcc: 0, lastFireT: -1,
         mode: 0, burstLeft: 0, meleeK: 0, meleeT: 0,
-      });
+        mod: { ...NEUTRAL }, attNodes, flashBase: model.flash.scale.x,
+      };
+      this.weapons.push(w);
     });
     this.gunLight = new THREE.PointLight(0xffc47a, 0, 9, 2);
     this.gunLight.position.set(0.2, -0.1, -0.8);
@@ -1072,6 +1197,30 @@ export class Engine {
   resume() {
     if (this.phase !== 'paused') return;
     this.canvas.requestPointerLock();
+  }
+
+  /** Equip attachments live. ids are prefixed 'p:' (pistol) / 's:' (SMG). */
+  applyLoadout(ids: string[]) {
+    this.weapons.forEach((w, wi) => {
+      const pfx = wi === 0 ? 'p' : 's';
+      const mod: WeaponMods = { ...NEUTRAL };
+      for (const raw of ids) {
+        const [p, id] = raw.split(':');
+        if (p !== pfx || !ATT_MODS[id]) continue;
+        for (const k of Object.keys(ATT_MODS[id]) as (keyof WeaponMods)[]) {
+          const v = ATT_MODS[id][k];
+          if (typeof v === 'number') (mod[k] as number) *= v;
+          else if (typeof v === 'boolean') (mod[k] as boolean) = (mod[k] as boolean) || v;
+        }
+        const add = ATT_MAGADD[id];
+        if (add) mod.magAdd += add[wi];
+      }
+      w.mod = mod;
+      const cap = w.cfg.magSize + mod.magAdd;
+      if (w.mag > cap) w.mag = cap;
+      for (const [aid, node] of Object.entries(w.attNodes)) node.visible = ids.includes(`${pfx}:${aid}`);
+    });
+    this.hudDirty = true;
   }
 
   setSensitivity(mult: number) {
@@ -1392,7 +1541,7 @@ export class Engine {
       return;
     }
     w.mag--;
-    w.cooldown = w.cfg.fireDelay;
+    w.cooldown = w.cfg.fireDelay * w.mod.fire;
     w.heat = Math.min(1, w.heat + (w.cfg.auto ? 0.11 : 0.2));
     this.shotsFired++;
 
@@ -1405,10 +1554,10 @@ export class Engine {
     if (this.simT - w.lastFireT > m.recovDelay + 0.05) w.burstAcc = 0;
     w.lastFireT = this.simT;
     const n = w.burstAcc++;
-    const mv = 1 + (Math.random() - 0.5) * m.varRange; // ±5–7% magnitude life, nothing wild
-    this.recTgtP += imp * m.patternPitch[n % m.patternPitch.length] * brace * mv;
+    const mv = 1 + (Math.random() - 0.5) * m.varRange * w.mod.noise; // ±5–7% magnitude life, nothing wild
+    this.recTgtP += imp * m.patternPitch[n % m.patternPitch.length] * brace * mv * w.mod.vert;
     this.recTgtY +=
-      imp * m.patternYaw[n % m.patternYaw.length] * brace * mv +
+      imp * m.patternYaw[n % m.patternYaw.length] * brace * mv * w.mod.horiz +
       imp * m.noise * (Math.random() - 0.5) * brace; // small yaw scatter around the line
 
     const weightShake = 1.12 / Math.sqrt(m.weightKg); // heavier guns rattle the shooter less
@@ -1423,9 +1572,12 @@ export class Engine {
 
     // --- random dispersion (the part the crosshair honestly reports): spread + heat + movement ---
     const speedXZ = Math.hypot(this.vel.x, this.vel.z);
+    const hipLaser = w.mod.laser && !this.ads; // the laser only steadies the hip-fire cone
     const bloom =
-      (w.cfg.spread + w.heat * w.cfg.bloom + Math.min(0.03, speedXZ * 0.0035) * (w.cfg.moveSpread / 0.022)) *
-      (this.ads ? 0.24 : 1) *
+      (w.cfg.spread * w.mod.spread +
+        w.heat * w.cfg.bloom * w.mod.bloom * (hipLaser ? 0.55 : 1) +
+        Math.min(0.03, speedXZ * 0.0035) * (w.cfg.moveSpread / 0.022) * w.mod.move * (hipLaser ? 0.5 : 1)) *
+      (this.ads ? 0.24 * w.mod.adsBloom : 1) *
       (this.grounded ? 1 : 1.6);
     w.aimJitX = (Math.random() - 0.5) * 2 * bloom * (0.5 + Math.random() * 0.8);
     w.aimJitY = (Math.random() - 0.5) * 2 * bloom * (0.5 + Math.random() * 0.8);

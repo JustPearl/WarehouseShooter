@@ -100,6 +100,18 @@ class Sfx {
     }
   }
 
+  /** canned subsonic thump + gas hiss of a suppressor */
+  supShot(kind: 'pistol' | 'smg') {
+    const lp = kind === 'pistol' ? 620 : 900;
+    this.noise(0.11, kind === 'pistol' ? 0.42 : 0.3, 'lowpass', lp, lp * 0.3, 0.85);
+    this.tone('sine', 120, 52, 0.09, 0.34);
+    this.noise(0.16, 0.1, 'highpass', 3800, 5200, 0.9, 0.04); // escaping gas
+  }
+
+  ui() {
+    this.tone('square', 560, 640, 0.022, 0.16);
+  }
+
   enemyShoot(dist: number) {
     const vol = Math.min(0.4, Math.max(0.06, 0.42 - dist * 0.013));
     this.noise(0.11, vol, 'bandpass', 700, 300, 1.1);
