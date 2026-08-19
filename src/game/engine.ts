@@ -738,6 +738,7 @@ export class Engine {
     this.recPitchV = this.recYawV = this.recRollV = 0;
     this.shake = 0;
     this.health = 100;
+    this.lastDamageT = -99;
     this.score = 0;
     this.kills = 0;
     this.headshots = 0;
@@ -1720,6 +1721,7 @@ export class Engine {
       gap: this.ads ? 3 : Math.round(6 + jit * 260),
       ads: this.ads,
       sprint: !!(this.keys['ShiftLeft'] || this.keys['ShiftRight']),
+      regen: this.health < 100 && this.health > 0 && this.simT - this.lastDamageT > 5,
     });
   }
 }

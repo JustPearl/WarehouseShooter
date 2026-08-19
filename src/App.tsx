@@ -20,6 +20,7 @@ const DEFAULT_HUD: HudState = {
   gap: 8,
   ads: false,
   sprint: false,
+  regen: false,
 };
 
 interface FeedItem { id: number; weapon: string; head: boolean; n: number }
@@ -156,7 +157,7 @@ export default function App() {
   const w = hud.weapons[hud.weaponIndex];
   const playing = hud.phase === 'playing' || hud.phase === 'paused';
   const healthPct = hud.health / 100;
-  const healthColor = healthPct > 0.5 ? '#bfeaf5' : healthPct > 0.25 ? '#ffab3d' : '#ff3b30';
+  const healthColor = hud.regen ? '#63e6b0' : healthPct > 0.5 ? '#bfeaf5' : healthPct > 0.25 ? '#ffab3d' : '#ff3b30';
 
   return (
     <div className="fixed inset-0 overflow-hidden bg-[#05090d] select-none">
@@ -247,9 +248,17 @@ export default function App() {
           {/* bottom-left: vitals */}
           <div className="hud-plate absolute bottom-5 left-5 px-5 py-3">
             <div className="flex items-end justify-between gap-8">
-              <div className="text-[10px] font-bold tracking-[0.3em] text-[#7fb7c9]">VITALS</div>
+              <div className="flex items-center gap-2">
+                <div className="text-[10px] font-bold tracking-[0.3em] text-[#7fb7c9]">VITALS</div>
+                {hud.regen && (
+                  <span className="fx-blink border border-[rgba(99,230,176,0.5)] bg-[rgba(99,230,176,0.12)] px-1.5 py-[1px] text-[9px] font-bold tracking-[0.22em] text-[#63e6b0]">
+                    RESTORING
+                  </span>
+                )}
+              </div>
               <div className="font-display text-2xl leading-none" style={{ color: healthColor }}>
                 {hud.health}
+                {hud.regen && <span className="ml-1 align-top text-sm text-[#63e6b0]">+</span>}
               </div>
             </div>
             <div className="mt-1.5 flex gap-[3px]">
@@ -297,7 +306,7 @@ export default function App() {
           {/* control hints during wave 1 */}
           {hud.wave <= 1 && hud.phase === 'playing' && (
             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-[11px] font-semibold tracking-[0.24em] text-[rgba(191,234,245,0.5)]">
-              R RELOAD&ensp;•&ensp;1/2 WEAPONS&ensp;•&ensp;RMB AIM&ensp;•&ensp;SHIFT SPRINT&ensp;•&ensp;SPACE JUMP
+              R RELOAD&ensp;•&ensp;1/2 WEAPONS&ensp;•&ensp;RMB AIM&ensp;•&ensp;SHIFT SPRINT&ensp;•&ensp;SPACE JUMP&ensp;•&ensp;5S CLEAR = VITALS RESTORE
             </div>
           )}
         </div>
@@ -335,6 +344,7 @@ export default function App() {
                   ['LMB', 'FIRE'], ['RMB', 'AIM DOWN SIGHTS'],
                   ['R', 'RELOAD'], ['1 / 2 / WHEEL', 'SWAP WEAPON'],
                   ['SHIFT', 'SPRINT'], ['SPACE', 'JUMP'], ['ESC', 'PAUSE'],
+                  ['5S CLEAR', 'VITALS RESTORE'],
                 ].map(([k, v]) => (
                   <div key={k} className="flex items-baseline justify-between gap-3 border-b border-[rgba(127,183,201,0.12)] py-1">
                     <span className="font-display text-[11px] text-[#ffab3d]">{k}</span>
