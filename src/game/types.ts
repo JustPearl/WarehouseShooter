@@ -30,7 +30,19 @@ export interface HudState {
   sprint: boolean;
   regen: boolean; // out-of-combat vitals restore active
   atts: string[]; // equipped attachment ids on the active weapon
+  streak: number; // current kill chain (0 = none)
+  streakT: number; // 1..0 — time left in the chain window
 }
+
+/** kill-chain callouts: exact counts that trigger a banner + stinger */
+export const STREAK_TIERS = [
+  { n: 2, label: 'DOUBLE KILL', tier: 1 },
+  { n: 3, label: 'TRIPLE KILL', tier: 2 },
+  { n: 4, label: 'RAMPAGE', tier: 3 },
+  { n: 5, label: 'FRENZY', tier: 4 },
+  { n: 6, label: 'UNSTOPPABLE', tier: 5 },
+  { n: 8, label: 'APEX PREDATOR', tier: 6 },
+];
 
 export interface EndStats {
   score: number;
@@ -48,6 +60,8 @@ export type GameEvent =
   | { type: 'waveclear'; n: number; bonus: number }
   | { type: 'kill'; weapon: string; head: boolean }
   | { type: 'pickup'; text: string }
+  | { type: 'streak'; n: number; label: string }
+  | { type: 'scorepop'; text: string; x: number; y: number; head: boolean }
   | { type: 'gameover'; stats: EndStats };
 
 export interface Hooks {

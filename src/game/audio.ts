@@ -202,6 +202,31 @@ class Sfx {
     this.tone('sawtooth', 90, 28, 1.4, 0.5);
     this.noise(1.1, 0.35, 'lowpass', 900, 60, 0.7);
   }
+
+  /** round whistling past your ear */
+  nearMiss() {
+    this.noise(0.14, 0.42, 'bandpass', 700, 3200, 2.2);
+    this.noise(0.09, 0.2, 'bandpass', 1400, 4200, 2.4, 0.03);
+  }
+
+  /** lub-dub thump under 35 vitals — interval handled by the engine */
+  heartbeat() {
+    this.tone('sine', 56, 38, 0.1, 0.55);
+    this.tone('sine', 50, 34, 0.12, 0.42, 0.17);
+  }
+
+  /** escalating killstreak fanfare — pitch climbs with the tier */
+  stinger(tier: number) {
+    const base = 265 * Math.pow(1.17, Math.min(6, tier));
+    const steps = [0, 7, 12, 17];
+    const n = Math.min(4, 1 + tier);
+    for (let i = 0; i < n; i++) {
+      const f = base * Math.pow(2, steps[i] / 12);
+      this.tone('square', f, f * 0.96, 0.11, 0.13, i * 0.062);
+    }
+    this.tone('sawtooth', base * 2, base * 2.02, 0.22, 0.1, (n - 1) * 0.062 + 0.05);
+    this.noise(0.16, 0.1, 'highpass', 3400, 5600, 0.8, 0.04);
+  }
 }
 
 export const sfx = new Sfx();

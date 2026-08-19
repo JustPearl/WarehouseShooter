@@ -9,7 +9,7 @@ import { buildLights, buildWorld, PathGrid } from './world';
 import type { Lamp } from './world';
 import {
   EYE, HALF_W, HALF_D, YARD_W, YARD_D, GRAV,
-  NEUTRAL, ATT_MODS, ATT_MAGADD, WEAPON_CFGS,
+  NEUTRAL, ATT_MODS, ATT_MAGADD, WEAPON_CFGS, STREAK_TIERS,
 } from './types';
 import type {
   GamePhase, Hooks, WeaponMods, WeaponRt, Enemy, RagJoint,
@@ -59,6 +59,12 @@ export class Engine {
   private recY = 0;
   private simT = 0; // accumulated sim time in seconds (burst-gap detection)
   private lastDamageT = -99; // sim-time of last hit taken (drives out-of-combat regen)
+  // adrenaline systems
+  private freezeT = 0; // hitstop: sim pauses for a beat on every kill
+  private streak = 0; // kill chain length
+  private lastKillT = -99; // sim-time of last kill (3.5s chain window)
+  private hbAcc = 0; // low-vitals heartbeat accumulator
+  private nmT = 0; // near-miss whoosh cooldown
   private shake = 0;
   private sensMul = 1; // mouse sensitivity multiplier (settings)
   private grounded = true;
@@ -348,6 +354,11 @@ export class Engine {
     this.score = 0;
     this.kills = 0;
     this.headshots = 0;
+    this.freezeT = 0;
+    this.streak = 0;
+    this.lastKillT = -99;
+    this.hbAcc = 0;
+    this.nmT = 0;
     this.shotsFired = 0;
     this.shotsHit = 0;
     this.runTime = 0;
@@ -527,12 +538,16 @@ export class Engine {
     this.fx.burst(model.group.position.clone().setY(0.1), 'snow', 10, 2.4, 3, 0.5);
   }
 
-  private killEnemy(e: Enemy, head: boolean, kx: number, kz: number) {
+  private killEnemy(e: Enemy, head: boolean, kx: number, kz: number, melee = false) {
     e.state = 'dying';
     e.t = 0;
     e.flashT = 0;
     for (const mt of e.flashMats) mt.emissiveIntensity = 0; // no glowing corpses
     this.enemyHits = this.enemyHits.filter((m) => m.userData.eid !== e.id);
+
+    // --- adrenaline: the world halts for a heartbeat and the lens punches in ---
+    this.freezeT = Math.max(this.freezeT, melee ? 0.085 : head ? 0.07 : 0.045);
+    this.fovKick -= head ? 0.6 : 0.28; // zoom snap toward the kill
 
     // --- ragdoll: shot momentum + limp joints ---
     const m = e.model;
@@ -558,10 +573,28 @@ export class Engine {
     };
     this.kills++;
     if (head) this.headshots++;
-    const gained = 100 + this.wave * 10 + (head ? 75 : 0);
+    // kill chain: another takedown inside 3.5s extends the streak and its multiplier
+    this.streak = this.simT - this.lastKillT < 3.5 ? this.streak + 1 : 1;
+    this.lastKillT = this.simT;
+    const mul = Math.min(2.5, 1 + 0.15 * (this.streak - 1));
+    const gained = Math.round((100 + this.wave * 10 + (head ? 75 : 0)) * mul);
     this.score += gained;
+    const tier = STREAK_TIERS.find((t) => this.streak === t.n);
+    if (tier) {
+      this.hooks.event({ type: 'streak', n: this.streak, label: tier.label });
+      sfx.stinger(tier.tier);
+    }
+    // floating score pop projected onto the screen at the point of death
+    const sp = this.tmpV2.copy(e.model.group.position).setY(1.4).project(this.camera);
+    if (sp.z < 1) {
+      this.hooks.event({
+        type: 'scorepop', text: `+${gained}`, head,
+        x: (sp.x * 0.5 + 0.5) * window.innerWidth,
+        y: (-sp.y * 0.5 + 0.5) * window.innerHeight,
+      });
+    }
     sfx.kill();
-    this.hooks.event({ type: 'kill', weapon: this.curWeapon().cfg.short, head });
+    this.hooks.event({ type: 'kill', weapon: melee ? 'STOCK STRIKE' : this.curWeapon().cfg.short, head });
     // drops
     const roll = Math.random();
     if (roll < 0.13 && this.health < 75) this.dropPickup(e.model.group.position, 'health');
@@ -660,7 +693,7 @@ export class Engine {
       const dot = (dx / (d || 1)) * fwd.x + (dz / (d || 1)) * fwd.z;
       if (dot < 0.55) continue; // must be roughly in front
       connected = true;
-      this.damageEnemy(e, 60, false, gp.clone().setY(1.1));
+      this.damageEnemy(e, 60, false, gp.clone().setY(1.1), true);
       // knock them back harder than a bullet would
       e.hurtT = 1.4;
       e.hurtX = (dx / (d || 1)) * 2.4;
@@ -776,7 +809,7 @@ export class Engine {
     this.hudDirty = true;
   }
 
-  private damageEnemy(e: Enemy, dmg: number, head: boolean, point: THREE.Vector3) {
+  private damageEnemy(e: Enemy, dmg: number, head: boolean, point: THREE.Vector3, melee = false) {
     if (e.state === 'dying') return;
     e.hp -= dmg;
     e.flashT = 0.1;
@@ -791,7 +824,7 @@ export class Engine {
     const killed = e.hp <= 0;
     sfx.hit(head);
     this.hooks.event({ type: 'hit', kill: killed, head });
-    if (killed) this.killEnemy(e, head, hx / hl, hz / hl);
+    if (killed) this.killEnemy(e, head, hx / hl, hz / hl, melee);
   }
 
   private damagePlayer(d: number) {
@@ -875,6 +908,17 @@ export class Engine {
     if (Math.random() < p) {
       this.damagePlayer(dmgRoll());
       this.fx.burst(this.tmpV.copy(this.pos).setY(this.pos.y - 0.5), 'blood', 4, 2, 7, 0.4);
+    } else {
+      // near miss: the round whistled within half a metre of the player — pure dread
+      const seg = this.tmpV3.copy(target).sub(muzzlePos);
+      const toP = this.tmpV.copy(this.pos).sub(muzzlePos);
+      const proj = toP.dot(seg) / seg.lengthSq();
+      if (proj > 0 && proj < 1 && toP.addScaledVector(seg, -proj).length() < 0.5 && this.nmT <= 0) {
+        this.nmT = 0.28;
+        sfx.nearMiss();
+        this.shake = Math.min(1, this.shake + 0.1);
+        this.fovKick += 0.14;
+      }
     }
   }
 
@@ -892,14 +936,20 @@ export class Engine {
 
   private tick(dt: number, t: number) {
     if (this.phase === 'playing') {
-      this.simT += dt;
-      this.astarBudget = 3; // a few path queries per frame keeps wave-start spikes smooth
-      this.updatePlayer(dt, t);
-      this.updateWeapons(dt);
-      this.updateEnemies(dt);
-      this.updateWaves(dt);
-      this.updatePickups(dt);
-      this.runTime += dt;
+      if (this.freezeT > 0) {
+        // hitstop: the world holds its breath for a beat around each kill
+        this.freezeT -= dt;
+        this.shake *= Math.exp(-6 * dt);
+      } else {
+        this.simT += dt;
+        this.astarBudget = 3; // a few path queries per frame keeps wave-start spikes smooth
+        this.updatePlayer(dt, t);
+        this.updateWeapons(dt);
+        this.updateEnemies(dt);
+        this.updateWaves(dt);
+        this.updatePickups(dt);
+        this.runTime += dt;
+      }
     } else if (this.phase === 'menu') {
       this.menuAngle += dt * 0.07;
       this.camera.position.set(Math.sin(this.menuAngle) * 21, 5.4 + Math.sin(t * 0.25) * 1.2, Math.cos(this.menuAngle) * 15);
@@ -920,6 +970,16 @@ export class Engine {
     if (this.health > 0 && this.health < 100 && this.simT - this.lastDamageT > 5) {
       this.health = Math.min(100, this.health + 26 * dt);
       this.hudDirty = true;
+    }
+
+    // dread: under 35 vitals your own heartbeat thumps in your ears, faster as you fade
+    this.nmT = Math.max(0, this.nmT - dt);
+    if (this.health > 0 && this.health < 35) {
+      this.hbAcc += dt;
+      if (this.hbAcc >= 0.55 + (this.health / 35) * 0.4) {
+        this.hbAcc = 0;
+        sfx.heartbeat();
+      }
     }
 
     const sprint = !!(this.keys['ShiftLeft'] || this.keys['ShiftRight']);
@@ -1364,6 +1424,11 @@ export class Engine {
   }
 
   private updateWaves(dt: number) {
+    // the kill chain collapses 3.5s after the last takedown
+    if (this.streak > 0 && this.simT - this.lastKillT > 3.5) {
+      this.streak = 0;
+      this.hudDirty = true;
+    }
     if (this.waveState === 'inter') {
       this.interT -= dt;
       if (this.interT <= 0) {
@@ -1501,6 +1566,8 @@ export class Engine {
       atts: Object.keys(w.attNodes).filter((a) => w.attNodes[a].visible),
       sprint: !!(this.keys['ShiftLeft'] || this.keys['ShiftRight']),
       regen: this.health < 100 && this.health > 0 && this.simT - this.lastDamageT > 5,
+      streak: this.streak,
+      streakT: this.streak > 0 ? Math.max(0, 1 - (this.simT - this.lastKillT) / 3.5) : 0,
     });
   }
 }
