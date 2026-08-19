@@ -86,13 +86,13 @@ const WEAPON_CFGS: WeaponCfg[] = [
   {
     id: 'pistol', name: 'KODIAK .45', short: 'KDK .45', auto: false,
     dmg: 34, headMul: 2.3, magSize: 8, startReserve: 56,
-    fireDelay: 0.16, reloadTime: 1.15, kick: 0.041, spread: 0.0032, bloom: 0.004, moveSpread: 0.022,
+    fireDelay: 0.16, reloadTime: 1.15, kick: 0.058, spread: 0.0032, bloom: 0.005, moveSpread: 0.022,
     hip: new THREE.Vector3(0.24, -0.21, -0.44), ads: new THREE.Vector3(0, -0.048, -0.3), adsFov: 64,
   },
   {
     id: 'smg', name: 'PTARMIGAN M9', short: 'PTM 9MM', auto: true,
     dmg: 13, headMul: 2.0, magSize: 30, startReserve: 150,
-    fireDelay: 0.072, reloadTime: 1.75, kick: 0.0135, spread: 0.0105, bloom: 0.024, moveSpread: 0.03,
+    fireDelay: 0.072, reloadTime: 1.75, kick: 0.0235, spread: 0.0095, bloom: 0.02, moveSpread: 0.03,
     hip: new THREE.Vector3(0.26, -0.24, -0.52), ads: new THREE.Vector3(0, -0.083, -0.36), adsFov: 58,
   },
 ];
@@ -108,6 +108,7 @@ interface WeaponRt {
   kickV: number;
   aimJitX: number; // pitch aim error baked into the gun's orientation (rad)
   aimJitY: number; // yaw aim error baked into the gun's orientation (rad)
+  patternSign: number; // running sign of the horizontal recoil drift
 }
 
 interface Enemy {
@@ -551,6 +552,7 @@ export class Engine {
       this.weapons.push({
         cfg, model, mag: cfg.magSize, reserve: cfg.startReserve,
         cooldown: 0, heat: 0, reloadT: -1, kickV: 0,
+        aimJitX: 0, aimJitY: 0, patternSign: 1,
       });
     });
     this.gunLight = new THREE.PointLight(0xffc47a, 0, 9, 2);
@@ -696,6 +698,8 @@ export class Engine {
       w.cooldown = 0;
       w.heat = 0;
       w.reloadT = -1;
+      w.aimJitX = 0;
+      w.aimJitY = 0;
       w.model.group.visible = i === 0;
     });
     this.gunRig.visible = true;
@@ -907,6 +911,8 @@ export class Engine {
     this.weapons[this.weaponIndex].model.group.visible = false;
     const w = this.weapons[i];
     w.reloadT = -1;
+    w.aimJitX = 0;
+    w.aimJitY = 0;
     w.model.group.visible = true;
     this.weaponIndex = i;
     w.kickV = 0.8;
@@ -936,14 +942,25 @@ export class Engine {
     w.heat = Math.min(1, w.heat + (w.cfg.auto ? 0.11 : 0.2));
     this.shotsFired++;
 
-    // --- 3D recoil impulse ---
-    const adsMul = this.ads ? 0.72 : 1;
-    this.recPitch += w.cfg.kick * (0.85 + Math.random() * 0.35) * adsMul;
-    this.recYaw += (Math.random() - 0.5) * w.cfg.kick * 0.75 * adsMul;
-    this.recRoll += (Math.random() - 0.5) * w.cfg.kick * 0.5;
-    this.shake = Math.min(1, this.shake + w.cfg.kick * 9);
-    this.fovKick = Math.min(1.6, this.fovKick + (w.cfg.auto ? 0.5 : 1.1));
+    // --- recoil: vertical climb, patterned horizontal drift with occasional hard snaps ---
+    const adsMul = this.ads ? 0.62 : 1;
+    this.recPitch += w.cfg.kick * (0.9 + Math.random() * 0.25) * adsMul;
+    const hard = Math.random() < 0.16 ? 2.3 : 1;
+    this.recYaw += w.patternSign * w.cfg.kick * 0.62 * hard * adsMul;
+    w.patternSign = Math.random() < 0.2 ? -1 : 1;
+    this.recRoll += (Math.random() - 0.5) * w.cfg.kick * 1.35;
+    this.shake = Math.min(1.5, this.shake + w.cfg.kick * (w.cfg.auto ? 13 : 30));
+    this.fovKick = Math.min(1.8, this.fovKick + (w.cfg.auto ? 0.55 : 1.2));
     w.kickV = 1;
+
+    // --- aim error lives IN the gun: recovery lag + heat bloom + movement (baked into barrel orientation) ---
+    const speedXZ = Math.hypot(this.vel.x, this.vel.z);
+    const bloom =
+      (w.cfg.spread + w.heat * w.cfg.bloom + Math.min(0.03, speedXZ * 0.0035) * (w.cfg.moveSpread / 0.022)) *
+      (this.ads ? 0.32 : 1) *
+      (this.grounded ? 1 : 1.6);
+    w.aimJitX = this.recPitch * 0.6 + (Math.random() - 0.5) * 2 * bloom * (0.5 + Math.random() * 0.8);
+    w.aimJitY = this.recYaw * 0.5 + (Math.random() - 0.5) * 2 * bloom * (0.5 + Math.random() * 0.8);
 
     sfx.shoot(w.cfg.id as 'pistol' | 'smg', this.ads);
     w.model.flash.visible = true;
@@ -954,19 +971,12 @@ export class Engine {
     // casing
     this.burst(this.tmpV2.copy(this.pos).add(new THREE.Vector3(0.15, -0.15, -0.2).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw)), 'case', 1, 1, 10, 0.7);
 
-    // --- hitscan with spread ---
-    const speedXZ = Math.hypot(this.vel.x, this.vel.z);
-    const spread =
-      (w.cfg.spread + w.heat * w.cfg.bloom + Math.min(0.03, speedXZ * 0.0035) * (w.cfg.moveSpread / 0.022)) *
-      (this.ads ? 0.32 : 1) *
-      (this.grounded ? 1 : 1.6);
-    const dir = this.camera.getWorldDirection(new THREE.Vector3());
-    const right = new THREE.Vector3().crossVectors(dir, this.camera.up).normalize();
-    const up = new THREE.Vector3().crossVectors(right, dir).normalize();
-    dir.addScaledVector(right, (Math.random() + Math.random() - 1) * spread)
-      .addScaledVector(up, (Math.random() + Math.random() - 1) * spread)
-      .normalize();
-    this.raycaster.set(this.camera.position, dir);
+    // --- hitscan: straight line out of the muzzle, exactly where the barrel points ---
+    const muzzleP = w.model.muzzle.getWorldPosition(this.tmpV).clone();
+    const dir = new THREE.Vector3();
+    w.model.muzzle.getWorldDirection(dir);
+    dir.normalize();
+    this.raycaster.set(muzzleP, dir);
     this.raycaster.far = 150;
     const targets = this.solidMeshes.concat(this.enemyHits);
     const hits = this.raycaster.intersectObjects(targets, false);
@@ -996,10 +1006,9 @@ export class Engine {
         sfx.impact();
       }
     } else {
-      end = this.camera.position.clone().addScaledVector(dir, 120);
+      end = muzzleP.clone().addScaledVector(dir, 120);
     }
-    w.model.muzzle.getWorldPosition(this.tmpV);
-    this.tracer(this.tracersP, this.tmpV.clone(), end);
+    this.tracer(this.tracersP, muzzleP, end);
     this.hudDirty = true;
   }
 
@@ -1183,10 +1192,10 @@ export class Engine {
     const bobY = Math.sin(this.bobPhase * 2) * 0.028 * bobAmp;
     const bobX = Math.cos(this.bobPhase) * 0.016 * bobAmp;
 
-    // recoil recovery
-    const rec = Math.min(1, dt * 9);
+    // recoil recovery (deliberately slower than the impulse, so sustained fire climbs)
+    const rec = Math.min(1, dt * 6.5);
     this.recPitch += (0 - this.recPitch) * rec;
-    this.recYaw += (0 - this.recYaw) * rec;
+    this.recYaw += (0 - this.recYaw) * Math.min(1, dt * 7.5);
     this.recRoll += (0 - this.recRoll) * Math.min(1, dt * 11);
     this.shake *= Math.exp(-7 * dt);
     this.fovKick *= Math.exp(-9 * dt);
@@ -1207,6 +1216,7 @@ export class Engine {
     this.swayX += ((-this.swayMX * 0.0004) - this.swayX) * Math.min(1, dt * 10);
     this.swayMX *= Math.exp(-12 * dt);
     this.swayY += ((Math.abs(this.swayMX) * 0.00012) - this.swayY) * Math.min(1, dt * 10);
+    const adsK = wantAds ? 0.34 : 1;
     const anchor = wantAds ? w.cfg.ads : w.cfg.hip;
     const lerpF = Math.min(1, dt * (wantAds ? 13 : 10));
     const g = w.model.group;
@@ -1217,12 +1227,13 @@ export class Engine {
     const reJerk = rp >= 0 && (rp < 0.12 || rp > 0.85) ? Math.sin(rp * 140) * 0.006 : 0;
 
     g.position.x += (anchor.x + this.swayX + bobX * 0.5 - re * 0.058 - g.position.x) * lerpF;
-    g.position.y += (anchor.y + this.swayY * 0.5 + bobY * 0.6 - w.kickV * 0.012 - re * 0.085 + reJerk - g.position.y) * lerpF;
-    g.position.z += (anchor.z + w.kickV * (w.cfg.auto ? 0.06 : 0.09) + re * 0.05 - g.position.z) * lerpF;
-    g.rotation.x = w.kickV * (w.cfg.auto ? 0.055 : 0.13) - re * 0.6;
-    g.rotation.z = this.swayX * 1.6 + this.recRoll * 0.5 - re * 0.52;
-    g.rotation.y = this.swayX * 1.1 + re * 0.24;
-    w.kickV *= Math.exp(-13 * dt);
+    g.position.y += (anchor.y + this.swayY * 0.5 + bobY * 0.6 - w.kickV * 0.02 - re * 0.085 + reJerk - g.position.y) * lerpF;
+    g.position.z += (anchor.z + w.kickV * (w.cfg.auto ? 0.075 : 0.115) + re * 0.05 - g.position.z) * lerpF;
+    // aim error is baked into the barrel: the gun visibly whips off-aim where the bullet actually goes
+    g.rotation.x = w.kickV * (w.cfg.auto ? 0.11 : 0.2) - w.aimJitX * adsK - re * 0.6;
+    g.rotation.z = this.swayX * 1.6 + this.recRoll * 0.9 - re * 0.52;
+    g.rotation.y = this.swayX * 1.1 + w.aimJitY * adsK + re * 0.24;
+    w.kickV *= Math.exp(-10 * dt);
   }
 
   private updateWeapons(dt: number) {
@@ -1495,10 +1506,7 @@ export class Engine {
   private pushHud() {
     this.hudDirty = false;
     const w = this.curWeapon();
-    const speedXZ = Math.hypot(this.vel.x, this.vel.z);
-    const spread =
-      (w.cfg.spread + w.heat * w.cfg.bloom + Math.min(0.03, speedXZ * 0.0035) * (w.cfg.moveSpread / 0.022)) *
-      (this.ads ? 0.32 : 1);
+    const jit = Math.hypot(w.aimJitX, w.aimJitY);
     const alive = this.enemies.filter((e) => e.state !== 'dying').length;
     this.hooks.hud({
       phase: this.phase,
@@ -1510,7 +1518,7 @@ export class Engine {
       score: this.score,
       kills: this.kills,
       reload: w.reloadT >= 0 ? w.reloadT / w.cfg.reloadTime : -1,
-      gap: this.ads ? 3 : Math.round(7 + spread * 1500),
+      gap: this.ads ? 3 : Math.round(6 + jit * 260),
       ads: this.ads,
       sprint: !!(this.keys['ShiftLeft'] || this.keys['ShiftRight']),
     });
