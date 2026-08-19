@@ -178,6 +178,28 @@ interface Enemy {
   hurtT: number;
   hurtX: number;
   hurtZ: number;
+  rag: Ragdoll | null;
+}
+
+/** Procedural ragdoll: spring-damper joints flopping to limp rests + a sliding, tipping torso. */
+interface RagJoint {
+  o: THREE.Object3D;
+  v: number; // angular velocity
+  rest: number; // randomized limp rest angle
+  min: number;
+  max: number;
+}
+interface Ragdoll {
+  vx: number;
+  vz: number;
+  spin: number;
+  y: number; // pelvis height
+  vy: number;
+  landed: boolean;
+  faceDown: boolean;
+  tip: number;
+  tipV: number;
+  joints: RagJoint[];
 }
 
 interface Pickup {
@@ -1094,15 +1116,41 @@ export class Engine {
       walkPhase: Math.random() * 6,
       flashT: 0, flashMats, fallDir: (Math.random() - 0.5) * 0.6,
       skin, seed: Math.random() * 100, fireKick: 0, hurtT: 0, hurtX: 0, hurtZ: 0,
+      rag: null,
     };
     this.enemies.push(e);
     this.burst(model.group.position.clone().setY(0.1), 'snow', 10, 2.4, 3, 0.5);
   }
 
-  private killEnemy(e: Enemy, head: boolean) {
+  private killEnemy(e: Enemy, head: boolean, kx: number, kz: number) {
     e.state = 'dying';
     e.t = 0;
+    e.flashT = 0;
+    for (const mt of e.flashMats) mt.emissiveIntensity = 0; // no glowing corpses
     this.enemyHits = this.enemyHits.filter((m) => m.userData.eid !== e.id);
+
+    // --- ragdoll: shot momentum + limp joints ---
+    const m = e.model;
+    const rnd = (a: number, b: number) => a + Math.random() * (b - a);
+    const kick = Math.hypot(kx, kz) || 1;
+    const j = (o: THREE.Object3D, vSpread: number, rest: number, min: number, max: number): RagJoint => ({
+      o, v: rnd(-vSpread, vSpread), rest: rest + rnd(-0.35, 0.35), min, max,
+    });
+    e.rag = {
+      vx: (kx / kick) * rnd(1.6, 3.0), vz: (kz / kick) * rnd(1.6, 3.0),
+      spin: e.fallDir * rnd(0.6, 1.6),
+      y: m.pelvis.position.y, vy: rnd(0.6, 1.6), landed: false,
+      faceDown: Math.random() < 0.25,
+      tip: m.pelvis.rotation.x, tipV: 0,
+      joints: [
+        j(m.hipL, 5, 0.55, -0.35, 2.0), j(m.hipR, 5, 0.4, -0.35, 2.0),
+        j(m.kneeL, 6, -0.55, -2.0, 0.35), j(m.kneeR, 6, -0.4, -2.0, 0.35),
+        j(m.shoulderL, 7, -0.5, -2.4, 1.3), j(m.shoulderR, 7, -0.6, -2.4, 1.3),
+        j(m.elbowL, 6, -0.7, -2.0, 0.5), j(m.elbowR, 6, -0.5, -2.0, 0.5),
+        j(m.spine, 3, rnd(-0.3, 0.3), -0.7, 1.0),
+        j(m.head, 8, 0.55, -0.8, 1.0),
+      ],
+    };
     this.kills++;
     if (head) this.headshots++;
     const gained = 100 + this.wave * 10 + (head ? 75 : 0);
@@ -1239,7 +1287,8 @@ export class Engine {
     // --- physical recoil: cartridge impulse, weight, stock and grip shape the pattern ---
     const m = w.cfg.recoil;
     const imp = w.cfg.kick * m.caliberImpulse;
-    const adsMul = this.ads ? (m.stock ? 0.52 : 0.62) : 1; // a stock braces tighter when shouldered
+    // shouldering the weapon braces it: sights aligned = climb, drift and roll all shrink
+    const adsMul = this.ads ? (m.stock ? 0.40 : 0.52) : 1;
     const mv = 0.8 + Math.random() * m.varRange; // per-shot character; heavy calibers vary more
     const weightShake = 1.12 / Math.sqrt(m.weightKg); // heavier guns rattle the shooter less
 
@@ -1272,8 +1321,8 @@ export class Engine {
     this.recPitch += pitchI * adsMul;
     this.recYaw += yawI * adsMul;
     this.recRoll += rollI * adsMul * (m.stock ? 0.7 : 1);
-    this.shake = Math.min(1.0, this.shake + imp * (m.stock ? 7.5 : 11) * weightShake * mv);
-    this.fovKick = Math.min(1.8, this.fovKick + imp * (m.stock ? 23.5 : 20.7) * mv);
+    this.shake = Math.min(1.0, this.shake + imp * (m.stock ? 7.5 : 11) * weightShake * mv * adsMul);
+    this.fovKick = Math.min(1.8, this.fovKick + imp * (m.stock ? 23.5 : 20.7) * mv * adsMul);
     w.kickV = 0.85 + Math.random() * 0.35; // muzzle flip strength varies shot to shot
     w.kickVar = 0.85 + Math.random() * 0.4;
     // action-cycle echo: a slide snaps back to battery with a downward jolt; a blowback bolt
@@ -1290,10 +1339,13 @@ export class Engine {
     const speedXZ = Math.hypot(this.vel.x, this.vel.z);
     const bloom =
       (w.cfg.spread + w.heat * w.cfg.bloom + Math.min(0.03, speedXZ * 0.0035) * (w.cfg.moveSpread / 0.022)) *
-      (this.ads ? 0.32 : 1) *
+      (this.ads ? 0.24 : 1) *
       (this.grounded ? 1 : 1.6);
-    w.aimJitX = this.recPitch * 0.6 + (Math.random() - 0.5) * 2 * bloom * (0.5 + Math.random() * 0.8);
-    w.aimJitY = this.recYaw * 0.5 + (Math.random() - 0.5) * 2 * bloom * (0.5 + Math.random() * 0.8);
+    // braced sight picture: recovery lag contributes far less to the error
+    const lagX = this.ads ? 0.30 : 0.6;
+    const lagY = this.ads ? 0.25 : 0.5;
+    w.aimJitX = this.recPitch * lagX + (Math.random() - 0.5) * 2 * bloom * (0.5 + Math.random() * 0.8);
+    w.aimJitY = this.recYaw * lagY + (Math.random() - 0.5) * 2 * bloom * (0.5 + Math.random() * 0.8);
 
     sfx.shoot(w.cfg.id as 'pistol' | 'smg', this.ads);
     w.model.flash.visible = true;
@@ -1360,7 +1412,7 @@ export class Engine {
     const killed = e.hp <= 0;
     sfx.hit(head);
     this.hooks.event({ type: 'hit', kill: killed, head });
-    if (killed) this.killEnemy(e, head);
+    if (killed) this.killEnemy(e, head, hx / hl, hz / hl);
   }
 
   private damagePlayer(d: number) {
@@ -1601,6 +1653,10 @@ export class Engine {
     const w = this.curWeapon();
     w.cooldown -= dt;
     w.heat = Math.max(0, w.heat - dt * (w.cfg.auto ? 0.55 : 0.8));
+    // a braced sight picture settles between shots — aim error decays much faster in ADS
+    const jitDecay = this.ads ? 8.5 : 2.4;
+    w.aimJitX *= Math.exp(-jitDecay * dt);
+    w.aimJitY *= Math.exp(-jitDecay * dt);
     // mechanical echo: small secondary jolt shortly after the action cycles
     if (w.echoT >= 0) {
       w.echoT -= dt;
@@ -1638,6 +1694,20 @@ export class Engine {
     }
   }
 
+  /** Slide from (ox,oz) to (nx,nz) without penetrating any solid collider. */
+  private collideClamp(ox: number, oz: number, nx: number, nz: number, r: number): [number, number] {
+    const dx = nx - ox, dz = nz - oz;
+    for (const box of this.colliderBoxes) {
+      if (oz > box.min.z - r && oz < box.max.z + r && nx > box.min.x - r && nx < box.max.x + r) {
+        nx = dx > 0 ? Math.min(nx, box.min.x - r) : Math.max(nx, box.max.x + r);
+      }
+      if (ox > box.min.x - r && ox < box.max.x + r && nz > box.min.z - r && nz < box.max.z + r) {
+        nz = dz > 0 ? Math.min(nz, box.min.z - r) : Math.max(nz, box.max.z + r);
+      }
+    }
+    return [nx, nz];
+  }
+
   private updateEnemies(dt: number) {
     const playerXZ = this.tmpV.set(this.pos.x, 0, this.pos.z);
     for (let i = this.enemies.length - 1; i >= 0; i--) {
@@ -1647,27 +1717,54 @@ export class Engine {
       if (e.state === 'dying') {
         e.t += dt;
         const m = e.model;
-        const k = Math.min(1, e.t * 2.2);
-        const ke = 1 - Math.pow(1 - k, 3);
-        m.pelvis.rotation.z = e.fallDir * ke * (Math.PI / 2 - 0.1); // hips give way
-        m.pelvis.rotation.x = -ke * 0.28;
-        m.kneeL.rotation.x = ke * 1.15; // legs buckle
-        m.kneeR.rotation.x = ke * 0.75;
-        m.hipL.rotation.x = -ke * 0.4;
-        m.hipR.rotation.x = ke * 0.25;
-        const flail = e.t < 0.4 ? Math.sin(e.t * 26) * (0.4 - e.t) : 0; // brief flail, then limp
-        m.shoulderL.rotation.x = -1.1 + ke * 0.9 + flail;
-        m.shoulderR.rotation.x = -1.35 + ke * 1.2 - flail;
-        m.elbowL.rotation.x = -1.05 * (1 - ke);
-        m.elbowR.rotation.x = -0.5 * (1 - ke);
-        m.spine.rotation.x = ke * 0.35;
-        m.head.rotation.x = ke * 0.85; // head lolls
-        m.head.rotation.y = e.fallDir * ke * 0.5;
-        m.rifle.visible = e.t < 0.45; // gun is dropped
-        e.model.group.rotation.z = e.fallDir * ke * 0.14;
-        if (e.t > 1.6) gp.y -= dt * 0.55;
-        if (e.t > 4 || gp.y < -1.4) {
-          this.scene.remove(e.model.group);
+        const r = e.rag;
+        if (!r) { this.scene.remove(m.group); this.enemies.splice(i, 1); continue; }
+
+        // body slides away from the shooter, scraping off speed on the ground
+        const [sx, sz] = this.collideClamp(gp.x, gp.z, gp.x + r.vx * dt, gp.z + r.vz * dt, 0.4);
+        gp.x = Math.max(-YARD_W + 1, Math.min(YARD_W - 1, sx));
+        gp.z = Math.max(-YARD_D + 1, Math.min(YARD_D - 1, sz));
+        const fr = Math.exp(-3.2 * dt);
+        r.vx *= fr; r.vz *= fr;
+        m.group.rotation.y += r.spin * dt;
+        r.spin *= Math.exp(-2.4 * dt);
+
+        // pelvis drops under gravity, hits the deck, bounces once
+        r.vy -= 11 * dt;
+        r.y += r.vy * dt;
+        if (r.y <= 0.26) {
+          r.y = 0.26;
+          if (!r.landed) {
+            r.landed = true;
+            this.burst(gp.clone().setY(0.08), 'snow', 7, 1.8, 2.2, 0.4);
+          } else if (r.vy < -1.2) {
+            r.vy = -r.vy * 0.28;
+          } else {
+            r.vy = 0;
+          }
+        }
+        m.pelvis.position.y = r.y;
+
+        // torso tips over (mostly flat on the back, sometimes face-down)
+        const tipRest = r.faceDown ? 1.28 : -1.3;
+        r.tipV += (tipRest - r.tip) * 7.5 * dt;
+        r.tipV *= Math.exp(-2.1 * dt);
+        r.tip += r.tipV * dt;
+        m.pelvis.rotation.x = r.tip;
+        m.pelvis.rotation.z = 0;
+
+        // joints: kicked by the shot, then damped springs flop to limp rests
+        for (const jnt of r.joints) {
+          jnt.v += (jnt.rest - jnt.o.rotation.x) * 9 * dt;
+          jnt.v *= Math.exp(-2.7 * dt);
+          jnt.o.rotation.x = Math.max(jnt.min, Math.min(jnt.max, jnt.o.rotation.x + jnt.v * dt));
+        }
+        m.head.rotation.y *= Math.exp(-3 * dt); // neck goes slack
+        m.rifle.visible = e.t < 0.35; // gun is flung clear
+
+        if (e.t > 5) gp.y -= dt * 0.5; // the storm slowly claims the body
+        if (e.t > 7.5 || gp.y < -1.4) {
+          this.scene.remove(m.group);
           this.enemies.splice(i, 1);
         }
         continue;
@@ -1733,18 +1830,9 @@ export class Engine {
 
       // integrate with collisions
       const r = 0.42;
-      let nextX = gp.x + mx * dt;
-      let nextZ = gp.z + mz * dt;
-      for (const box of this.colliderBoxes) {
-        if (gp.z > box.min.z - r && gp.z < box.max.z + r && nextX > box.min.x - r && nextX < box.max.x + r) {
-          nextX = mx > 0 ? Math.min(nextX, box.min.x - r) : Math.max(nextX, box.max.x + r);
-        }
-        if (gp.x > box.min.x - r && gp.x < box.max.x + r && nextZ > box.min.z - r && nextZ < box.max.z + r) {
-          nextZ = mz > 0 ? Math.min(nextZ, box.min.z - r) : Math.max(nextZ, box.max.z + r);
-        }
-      }
-      gp.x = Math.max(-YARD_W + 1, Math.min(YARD_W - 1, nextX));
-      gp.z = Math.max(-YARD_D + 1, Math.min(YARD_D - 1, nextZ));
+      const [nx2, nz2] = this.collideClamp(gp.x, gp.z, gp.x + mx * dt, gp.z + mz * dt, r);
+      gp.x = Math.max(-YARD_W + 1, Math.min(YARD_W - 1, nx2));
+      gp.z = Math.max(-YARD_D + 1, Math.min(YARD_D - 1, nz2));
       e.model.group.rotation.y = Math.atan2(dx, dz);
 
       // --- skeletal animation ---
@@ -1779,8 +1867,15 @@ export class Engine {
         e.hurtT -= dt * 3.2;
         m.spine.rotation.x += e.hurtT * 0.38;
         m.head.rotation.x -= e.hurtT * 0.3;
-        gp.x = Math.max(-YARD_W + 1, Math.min(YARD_W - 1, gp.x + e.hurtX * e.hurtT * dt * 2.4));
-        gp.z = Math.max(-YARD_D + 1, Math.min(YARD_D - 1, gp.z + e.hurtZ * e.hurtT * dt * 2.4));
+        // stagger shoves must respect cover too — no clipping into crates
+        const [hx2, hz2] = this.collideClamp(
+          gp.x, gp.z,
+          gp.x + e.hurtX * e.hurtT * dt * 2.4,
+          gp.z + e.hurtZ * e.hurtT * dt * 2.4,
+          0.42,
+        );
+        gp.x = Math.max(-YARD_W + 1, Math.min(YARD_W - 1, hx2));
+        gp.z = Math.max(-YARD_D + 1, Math.min(YARD_D - 1, hz2));
       }
 
       // hit flash decay
