@@ -515,7 +515,7 @@ const ARMORY = [
     mode: 'SEMI-AUTO SIDEARM',
     spec: ['.45 ACP', '1.05 KG', 'STOCKLESS', 'SLIDE ACTION'],
     desc: 'Heavy-frame depot pistol. Slow, but each .45 round hits like a sledgehammer. Iron sights, honest work.',
-    recoil: 'FREE-RECOIL WANDER — HEAVY SLIDE SNAP',
+    recoil: 'SIX HEAVY SHOVES, ALTERNATING TWIST — FAST RESET',
     stats: [
       ['DMG', 88, true],
       ['ROF', 34, false],
