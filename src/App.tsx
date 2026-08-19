@@ -535,61 +535,6 @@ export default function App() {
             </div>
           )}
 
-          {/* (legacy inline briefing + armory moved into the Field Manual) */}
-          <div className="hidden">
-            <div className="hidden">
-
-
-
-
-
-            </div>
-
-            {/* right: armory */}
-            <div className="fx-rise w-full max-w-sm" style={{ animationDelay: '0.12s' }}>
-              <div className="hud-plate hud-plate-r px-6 py-5">
-                <div className="flex items-baseline justify-between">
-                  <h2 className="font-display text-xl text-[#bfeaf5]">ARMORY</h2>
-                  <span className="text-[10px] font-bold tracking-[0.3em] text-[#7fb7c9]">ISSUED ON SITE</span>
-                </div>
-
-                {ARMORY.map((a) => (
-                  <div key={a.name} className="mt-5 border-t border-[rgba(127,183,201,0.15)] pt-4 first-of-type:border-t-0">
-                    <div className="flex items-baseline justify-between">
-                      <span className="font-display text-lg text-[#ffab3d]">{a.name}</span>
-                      <span className="text-[10px] font-bold tracking-[0.25em] text-[#7fb7c9]">{a.mode}</span>
-                    </div>
-                    <div className="mt-1.5 flex flex-wrap gap-1.5">
-                      {a.spec.map((s) => (
-                        <span key={s} className="border border-[rgba(127,183,201,0.28)] px-1.5 py-[2px] text-[9px] font-bold tracking-[0.16em] text-[#9cc3d2]">
-                          {s}
-                        </span>
-                      ))}
-                    </div>
-                    <p className="mt-1.5 text-[12px] font-medium text-[#7fb7c9]">{a.desc}</p>
-                    <div className="mt-2 flex items-center gap-2 text-[9px] font-bold tracking-[0.18em]">
-                      <span className="text-[#ff5c33]">RECOIL</span>
-                      <span className="h-px flex-1 bg-[rgba(127,183,201,0.18)]" />
-                      <span className="text-[#bfeaf5]">{a.recoil}</span>
-                    </div>
-                    <div className="mt-2.5 space-y-1.5">
-                      {a.stats.map(([label, v, amber]) => (
-                        <div key={label} className="flex items-center gap-3">
-                          <span className="w-9 text-[10px] font-bold tracking-[0.2em] text-[#7fb7c9]">{label}</span>
-                          <div className={`stat-bar flex-1 ${amber ? 'amber' : ''}`}><i style={{ width: `${v}%` }} /></div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-
-                <div className="mt-5 border-t border-[rgba(127,183,201,0.15)] pt-3 text-[11px] font-semibold tracking-[0.18em] text-[#7fb7c9]">
-                  <span className="text-[#ff5c33]">INTEL //</span> WAVES SCALE IN NUMBER AND ARMOR.
-                  HEADSHOTS PAY +75. SUPPLY CRATES DROP FROM HOSTILES.
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
       )}
 
