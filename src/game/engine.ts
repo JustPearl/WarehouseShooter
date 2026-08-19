@@ -106,9 +106,13 @@ interface WeaponRt {
   heat: number;
   reloadT: number; // -1 idle
   kickV: number;
+  kickVis: number; // low-passed kickV -> muzzle flip ramps in instead of slamming
+  kickVar: number; // per-shot flip magnitude (0.85..1.25)
   aimJitX: number; // pitch aim error baked into the gun's orientation (rad)
   aimJitY: number; // yaw aim error baked into the gun's orientation (rad)
   patternSign: number; // running sign of the horizontal recoil drift
+  echoT: number; // delayed mechanical echo impulse (-1 idle)
+  echoMag: number;
 }
 
 interface Enemy {
@@ -162,6 +166,10 @@ export class Engine {
   private recPitch = 0;
   private recYaw = 0;
   private recRoll = 0;
+  // low-passed views of the recoil targets: impulses ramp in over ~45ms instead of slamming in one frame
+  private recPitchV = 0;
+  private recYawV = 0;
+  private recRollV = 0;
   private shake = 0;
   private grounded = true;
   private bobPhase = 0;
@@ -551,8 +559,8 @@ export class Engine {
       this.gunRig.add(model.group);
       this.weapons.push({
         cfg, model, mag: cfg.magSize, reserve: cfg.startReserve,
-        cooldown: 0, heat: 0, reloadT: -1, kickV: 0,
-        aimJitX: 0, aimJitY: 0, patternSign: 1,
+        cooldown: 0, heat: 0, reloadT: -1, kickV: 0, kickVis: 0, kickVar: 1,
+        aimJitX: 0, aimJitY: 0, patternSign: 1, echoT: -1, echoMag: 0,
       });
     });
     this.gunLight = new THREE.PointLight(0xffc47a, 0, 9, 2);
@@ -680,6 +688,7 @@ export class Engine {
     this.yaw = Math.PI;
     this.pitch = 0;
     this.recPitch = this.recYaw = this.recRoll = 0;
+    this.recPitchV = this.recYawV = this.recRollV = 0;
     this.shake = 0;
     this.health = 100;
     this.score = 0;
@@ -700,6 +709,9 @@ export class Engine {
       w.reloadT = -1;
       w.aimJitX = 0;
       w.aimJitY = 0;
+      w.echoT = -1;
+      w.kickVis = 0;
+      w.kickVar = 1;
       w.model.group.visible = i === 0;
     });
     this.gunRig.visible = true;
@@ -913,6 +925,7 @@ export class Engine {
     w.reloadT = -1;
     w.aimJitX = 0;
     w.aimJitY = 0;
+    w.echoT = -1;
     w.model.group.visible = true;
     this.weaponIndex = i;
     w.kickV = 0.8;
@@ -942,16 +955,22 @@ export class Engine {
     w.heat = Math.min(1, w.heat + (w.cfg.auto ? 0.11 : 0.2));
     this.shotsFired++;
 
-    // --- recoil: vertical climb, patterned horizontal drift with occasional hard snaps ---
+    // --- recoil: vertical climb, patterned horizontal drift, per-shot character ---
     const adsMul = this.ads ? 0.62 : 1;
-    this.recPitch += w.cfg.kick * (0.9 + Math.random() * 0.25) * adsMul;
-    const hard = Math.random() < 0.16 ? 2.3 : 1;
-    this.recYaw += w.patternSign * w.cfg.kick * 0.62 * hard * adsMul;
+    const mv = 0.8 + Math.random() * 0.52; // every shot kicks a little differently
+    this.recPitch += w.cfg.kick * mv * (0.9 + Math.random() * 0.25) * adsMul;
+    const hard = Math.random() < 0.14 ? 2.0 + Math.random() * 1.4 : 1; // occasional hard yank
+    this.recYaw += w.patternSign * w.cfg.kick * 0.62 * hard * mv * adsMul;
     w.patternSign = Math.random() < 0.2 ? -1 : 1;
-    this.recRoll += (Math.random() - 0.5) * w.cfg.kick * 1.35;
-    this.shake = Math.min(1.5, this.shake + w.cfg.kick * (w.cfg.auto ? 13 : 30));
-    this.fovKick = Math.min(1.8, this.fovKick + (w.cfg.auto ? 0.55 : 1.2));
-    w.kickV = 1;
+    const pull = hard > 1 ? (Math.random() < 0.5 ? -1 : 1) * (0.8 + (hard - 1) * 0.55) : 1;
+    this.recRoll += (Math.random() - 0.5) * w.cfg.kick * 1.35 * mv * pull;
+    this.shake = Math.min(1.5, this.shake + w.cfg.kick * (w.cfg.auto ? 13 : 30) * mv);
+    this.fovKick = Math.min(1.8, this.fovKick + (w.cfg.auto ? 0.55 : 1.2) * mv);
+    w.kickV = 0.85 + Math.random() * 0.35; // muzzle flip strength varies shot to shot
+    w.kickVar = 0.85 + Math.random() * 0.4;
+    // mechanical echo: a small secondary jolt as the action cycles, a few frames later
+    w.echoT = 0.05 + Math.random() * 0.055;
+    w.echoMag = w.cfg.kick * (0.22 + Math.random() * 0.4);
 
     // --- aim error lives IN the gun: recovery lag + heat bloom + movement (baked into barrel orientation) ---
     const speedXZ = Math.hypot(this.vel.x, this.vel.z);
@@ -1200,11 +1219,17 @@ export class Engine {
     this.shake *= Math.exp(-7 * dt);
     this.fovKick *= Math.exp(-9 * dt);
 
+    // smooth attack: impulses ramp into the view over ~45ms instead of snapping in one frame
+    const att = Math.min(1, dt * 22);
+    this.recPitchV += (this.recPitch - this.recPitchV) * att;
+    this.recYawV += (this.recYaw - this.recYawV) * att;
+    this.recRollV += (this.recRoll - this.recRollV) * att;
+
     // camera
     const shX = Math.sin(t * 91) * this.shake * 0.012;
     const shY = Math.cos(t * 83) * this.shake * 0.012;
     this.camera.position.set(this.pos.x + bobX * Math.cos(this.yaw), this.pos.y + bobY, this.pos.z - bobX * Math.sin(this.yaw));
-    this.camera.rotation.set(this.pitch + this.recPitch + shX, this.yaw + this.recYaw + shY, this.recRoll);
+    this.camera.rotation.set(this.pitch + this.recPitchV + shX, this.yaw + this.recYawV + shY, this.recRollV);
 
     // fov
     const w = this.curWeapon();
@@ -1227,10 +1252,13 @@ export class Engine {
     const reJerk = rp >= 0 && (rp < 0.12 || rp > 0.85) ? Math.sin(rp * 140) * 0.006 : 0;
 
     g.position.x += (anchor.x + this.swayX + bobX * 0.5 - re * 0.058 - g.position.x) * lerpF;
-    g.position.y += (anchor.y + this.swayY * 0.5 + bobY * 0.6 - w.kickV * 0.02 - re * 0.085 + reJerk - g.position.y) * lerpF;
-    g.position.z += (anchor.z + w.kickV * (w.cfg.auto ? 0.075 : 0.115) + re * 0.05 - g.position.z) * lerpF;
+    // smoothed muzzle flip (ramps in, per-shot magnitude)
+    w.kickVis += (w.kickV - w.kickVis) * Math.min(1, dt * 16);
+    const kv = w.kickVis * w.kickVar;
+    g.position.y += (anchor.y + this.swayY * 0.5 + bobY * 0.6 - kv * 0.02 - re * 0.085 + reJerk - g.position.y) * lerpF;
+    g.position.z += (anchor.z + kv * (w.cfg.auto ? 0.075 : 0.115) + re * 0.05 - g.position.z) * lerpF;
     // aim error is baked into the barrel: the gun visibly whips off-aim where the bullet actually goes
-    g.rotation.x = w.kickV * (w.cfg.auto ? 0.11 : 0.2) - w.aimJitX * adsK - re * 0.6;
+    g.rotation.x = kv * (w.cfg.auto ? 0.11 : 0.2) - w.aimJitX * adsK - re * 0.6;
     g.rotation.z = this.swayX * 1.6 + this.recRoll * 0.9 - re * 0.52;
     g.rotation.y = this.swayX * 1.1 + w.aimJitY * adsK + re * 0.24;
     w.kickV *= Math.exp(-10 * dt);
@@ -1240,6 +1268,15 @@ export class Engine {
     const w = this.curWeapon();
     w.cooldown -= dt;
     w.heat = Math.max(0, w.heat - dt * (w.cfg.auto ? 0.55 : 0.8));
+    // mechanical echo: small secondary jolt shortly after the action cycles
+    if (w.echoT >= 0) {
+      w.echoT -= dt;
+      if (w.echoT < 0) {
+        this.recPitch += w.echoMag;
+        w.aimJitX = Math.min(0.05, w.aimJitX + w.echoMag * 0.8);
+        w.kickV = Math.min(1.2, w.kickV + 0.16);
+      }
+    }
     if (w.reloadT >= 0) {
       w.reloadT += dt;
       this.hudDirty = true;

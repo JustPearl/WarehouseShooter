@@ -88,6 +88,7 @@ export function buildPistol(): WeaponModel {
 
   const muzzle = new THREE.Object3D();
   muzzle.position.set(0, 0.004, -0.27);
+  muzzle.rotation.y = Math.PI; // gun is built facing -Z: make +Z point down the barrel
   g.add(muzzle);
   const flash = addFlash(muzzle, 0.3);
 
@@ -153,6 +154,7 @@ export function buildSMG(): WeaponModel {
 
   const muzzle = new THREE.Object3D();
   muzzle.position.set(0, 0.008, -0.475);
+  muzzle.rotation.y = Math.PI; // gun is built facing -Z: make +Z point down the barrel
   g.add(muzzle);
   const flash = addFlash(muzzle, 0.36);
 
