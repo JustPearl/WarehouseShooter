@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { sfx } from './audio';
 import { floorTexture, wallTexture, crateTexture, concreteTexture, flashTexture, dotTexture } from './textures';
-import { buildPistol, buildSMG, buildMercenary } from './models';
+import { buildPistol, buildSMG, buildMercenary, MERC_SKINS } from './models';
 import type { WeaponModel, MercModel } from './models';
 
 /* ============================== types ============================== */
@@ -30,6 +30,7 @@ export interface HudState {
   gap: number; // crosshair gap px
   ads: boolean;
   sprint: boolean;
+  regen: boolean; // out-of-combat vitals restore active
 }
 
 export interface EndStats {
@@ -169,6 +170,12 @@ interface Enemy {
   flashT: number;
   flashMats: THREE.MeshStandardMaterial[];
   fallDir: number;
+  skin: number;
+  seed: number;
+  fireKick: number;
+  hurtT: number;
+  hurtX: number;
+  hurtZ: number;
 }
 
 interface Pickup {
@@ -208,6 +215,7 @@ export class Engine {
   private recYawV = 0;
   private recRollV = 0;
   private simT = 0; // accumulated sim time in seconds (burst-gap detection)
+  private lastDamageT = -99; // sim-time of last hit taken (drives out-of-combat regen)
   private shake = 0;
   private grounded = true;
   private bobPhase = 0;
@@ -818,7 +826,8 @@ export class Engine {
       if (dx * dx + dz * dz > 18 * 18) { best = a; break; }
     }
     const id = this.enemyIdSeq++;
-    const model = buildMercenary(id);
+    const skin = Math.floor(Math.random() * MERC_SKINS.length);
+    const model = buildMercenary(skin);
     model.group.position.set(best[0] + (Math.random() - 0.5) * 3, -1.5, best[1] + (Math.random() - 0.5) * 3);
     this.scene.add(model.group);
 
@@ -831,31 +840,27 @@ export class Engine {
       m.material = mat;
       flashMats.push(mat);
     };
-    cloneMat(model.torso);
-    cloneMat(model.head);
-    cloneMat(model.legL);
-    cloneMat(model.legR);
+    cloneMat(model.headMesh);
+    for (const m of model.bodyMeshes) cloneMat(m);
 
     const reg = (mesh: THREE.Mesh, part: 'head' | 'body') => {
       mesh.userData.eid = id;
       mesh.userData.part = part;
       this.enemyHits.push(mesh);
     };
-    reg(model.head, 'head');
-    reg(model.torso, 'body');
-    reg(model.legL, 'body');
-    reg(model.legR, 'body');
-    reg(model.armL, 'body');
+    reg(model.headMesh, 'head');
+    for (const m of model.bodyMeshes) reg(m, 'body');
 
     const e: Enemy = {
-      id, model, hp: 45 + (this.wave - 1) * 10,
+      id, model, hp: Math.round((45 + (this.wave - 1) * 10) * model.bulk), // armored variants soak more
       state: 'rise', t: 0, strafeDir: Math.random() > 0.5 ? 1 : -1,
       strafeT: 1 + Math.random(), burst: 0, burstT: 0,
       shotT: 1.2 + Math.random() * 1.2,
-      speed: Math.min(4.0, 2.3 + (this.wave - 1) * 0.15),
+      speed: Math.min(4.0, 2.3 + (this.wave - 1) * 0.15) * (2 - model.bulk), // heavier gear, slower boots
       prefDist: 10 + Math.random() * 6,
       walkPhase: Math.random() * 6,
       flashT: 0, flashMats, fallDir: (Math.random() - 0.5) * 0.6,
+      skin, seed: Math.random() * 100, fireKick: 0, hurtT: 0, hurtX: 0, hurtZ: 0,
     };
     this.enemies.push(e);
     this.burst(model.group.position.clone().setY(0.1), 'snow', 10, 2.4, 3, 0.5);
@@ -1111,6 +1116,13 @@ export class Engine {
     if (e.state === 'dying') return;
     e.hp -= dmg;
     e.flashT = 0.1;
+    // hit reaction: flinch and stagger away from the shooter
+    e.hurtT = 1;
+    const hx = e.model.group.position.x - this.pos.x;
+    const hz = e.model.group.position.z - this.pos.z;
+    const hl = Math.hypot(hx, hz) || 1;
+    e.hurtX = (hx / hl) * (0.7 + Math.random() * 0.5);
+    e.hurtZ = (hz / hl) * (0.7 + Math.random() * 0.5);
     this.burst(point, 'blood', head ? 12 : 8, 2.6, 7, 0.5);
     const killed = e.hp <= 0;
     sfx.hit(head);
@@ -1121,6 +1133,7 @@ export class Engine {
   private damagePlayer(d: number) {
     if (this.phase !== 'playing') return;
     this.health = Math.max(0, this.health - d);
+    this.lastDamageT = this.simT; // regen clock resets on every hit
     this.shake = Math.min(1.0, this.shake + 0.28);
     sfx.hurt();
     this.hooks.event({ type: 'damage' });
@@ -1159,6 +1172,7 @@ export class Engine {
 
     e.model.flash.visible = true;
     setTimeout(() => { e.model.flash.visible = false; }, 55);
+    e.fireKick = 1; // shoulder + rifle recoil anim
     sfx.enemyShoot(dist);
     this.tracer(this.tracersE, muzzlePos, target);
 
@@ -1219,6 +1233,12 @@ export class Engine {
   }
 
   private updatePlayer(dt: number, t: number) {
+    // out-of-combat regen: 5s after the last hit, vitals restore at 26/s
+    if (this.health > 0 && this.health < 100 && this.simT - this.lastDamageT > 5) {
+      this.health = Math.min(100, this.health + 26 * dt);
+      this.hudDirty = true;
+    }
+
     const sprint = !!(this.keys['ShiftLeft'] || this.keys['ShiftRight']);
     const wantAds = this.ads && this.curWeapon().reloadT < 0;
     const speedBase = (sprint && !wantAds ? 6.3 : 4.3) * (wantAds ? 0.55 : 1);
@@ -1393,8 +1413,25 @@ export class Engine {
 
       if (e.state === 'dying') {
         e.t += dt;
-        e.model.group.rotation.x = -Math.min(1, e.t * 2.6) * (Math.PI / 2 - 0.06);
-        e.model.group.rotation.z = e.fallDir * Math.min(1, e.t * 2.6);
+        const m = e.model;
+        const k = Math.min(1, e.t * 2.2);
+        const ke = 1 - Math.pow(1 - k, 3);
+        m.pelvis.rotation.z = e.fallDir * ke * (Math.PI / 2 - 0.1); // hips give way
+        m.pelvis.rotation.x = -ke * 0.28;
+        m.kneeL.rotation.x = ke * 1.15; // legs buckle
+        m.kneeR.rotation.x = ke * 0.75;
+        m.hipL.rotation.x = -ke * 0.4;
+        m.hipR.rotation.x = ke * 0.25;
+        const flail = e.t < 0.4 ? Math.sin(e.t * 26) * (0.4 - e.t) : 0; // brief flail, then limp
+        m.shoulderL.rotation.x = -1.1 + ke * 0.9 + flail;
+        m.shoulderR.rotation.x = -1.35 + ke * 1.2 - flail;
+        m.elbowL.rotation.x = -1.05 * (1 - ke);
+        m.elbowR.rotation.x = -0.5 * (1 - ke);
+        m.spine.rotation.x = ke * 0.35;
+        m.head.rotation.x = ke * 0.85; // head lolls
+        m.head.rotation.y = e.fallDir * ke * 0.5;
+        m.rifle.visible = e.t < 0.45; // gun is dropped
+        e.model.group.rotation.z = e.fallDir * ke * 0.14;
         if (e.t > 1.6) gp.y -= dt * 0.55;
         if (e.t > 4 || gp.y < -1.4) {
           this.scene.remove(e.model.group);
@@ -1405,8 +1442,23 @@ export class Engine {
 
       if (e.state === 'rise') {
         e.t += dt * 1.6;
-        gp.y = THREE.MathUtils.lerp(-1.5, 0, Math.min(1, e.t));
-        if (e.t >= 1) { e.state = 'live'; gp.y = 0; }
+        const t = Math.min(1, e.t);
+        gp.y = THREE.MathUtils.lerp(-1.5, 0, t);
+        const m = e.model;
+        const c = 1 - t; // crouch: hauling themselves out of the snow
+        m.pelvis.rotation.x = -c * 0.75;
+        m.spine.rotation.x = c * 0.45;
+        m.kneeL.rotation.x = c * 0.85;
+        m.kneeR.rotation.x = c * 0.85;
+        m.shoulderL.rotation.x = -1.1 - c * 0.3;
+        m.shoulderR.rotation.x = -1.35 - c * 0.25;
+        m.head.rotation.x = c * 0.6; // eyes down while climbing out
+        if (e.t >= 1) {
+          e.state = 'live'; gp.y = 0;
+          m.pelvis.rotation.x = 0; m.spine.rotation.x = 0;
+          m.kneeL.rotation.x = 0; m.kneeR.rotation.x = 0;
+          m.head.rotation.x = 0;
+        }
         continue;
       }
 
@@ -1462,13 +1514,41 @@ export class Engine {
       gp.z = Math.max(-HALF_D + 1, Math.min(HALF_D - 1, nextZ));
       e.model.group.rotation.y = Math.atan2(dx, dz);
 
-      // walk anim
+      // --- skeletal animation ---
+      const m = e.model;
       const moving = Math.hypot(mx, mz) > 0.4;
-      e.walkPhase += (moving ? e.speed : 0) * dt * 2.6;
-      const sw = Math.sin(e.walkPhase) * 0.65;
-      e.model.legL.rotation.x = sw;
-      e.model.legR.rotation.x = -sw;
-      e.model.armL.rotation.x = -1.05 + Math.sin(e.walkPhase + Math.PI) * 0.12;
+      e.walkPhase += (moving ? e.speed : 0.6) * dt * 2.7;
+      const sw = Math.sin(e.walkPhase);
+      const stride = moving ? 1 : 0;
+      m.hipL.rotation.x = sw * 0.62 * stride;
+      m.hipR.rotation.x = -sw * 0.62 * stride;
+      m.kneeL.rotation.x = Math.max(0, -Math.sin(e.walkPhase - 0.6)) * 0.85 * stride + 0.06;
+      m.kneeR.rotation.x = Math.max(0, Math.sin(e.walkPhase - 0.6)) * 0.85 * stride + 0.06;
+      gp.y = Math.abs(Math.cos(e.walkPhase)) * 0.05 * stride; // body bounce
+      m.pelvis.rotation.y = sw * 0.14 * stride; // hip twist
+      m.pelvis.rotation.z = Math.sin(this.simT * 1.2 + e.seed) * 0.035; // weight shift
+      m.spine.rotation.y = -sw * 0.1 * stride;
+      m.spine.rotation.x = Math.sin(this.simT * 2.1 + e.seed) * 0.025; // breathing
+
+      // aim: head tracks with lazy saccades, rifle held high-ready
+      m.head.rotation.y = Math.sin(this.simT * 0.9 + e.seed * 3) * 0.24 + e.strafeDir * 0.09;
+      m.head.rotation.x = Math.sin(this.simT * 1.4 + e.seed) * 0.05 + e.fireKick * 0.07;
+      m.shoulderR.rotation.x = -1.35 - e.fireKick * 0.24; // shoulder absorbs each shot
+      m.shoulderR.rotation.y = -0.12 + Math.sin(e.walkPhase * 0.5) * 0.03 * stride;
+      m.elbowR.rotation.x = -0.5 - e.fireKick * 0.1;
+      m.shoulderL.rotation.x = -1.1 + Math.sin(e.walkPhase + Math.PI) * 0.06 * stride;
+      m.rifle.position.z = m.rifleZ - e.fireKick * 0.07; // rifle punches back
+      m.rifle.rotation.x = -e.fireKick * 0.09;
+      e.fireKick = Math.max(0, e.fireKick - dt * 9);
+
+      // hit reaction: spine snaps back, head whips, body staggers away from the shooter
+      if (e.hurtT > 0) {
+        e.hurtT -= dt * 3.2;
+        m.spine.rotation.x += e.hurtT * 0.38;
+        m.head.rotation.x -= e.hurtT * 0.3;
+        gp.x = Math.max(-HALF_W + 1, Math.min(HALF_W - 1, gp.x + e.hurtX * e.hurtT * dt * 2.4));
+        gp.z = Math.max(-HALF_D + 1, Math.min(HALF_D - 1, gp.z + e.hurtZ * e.hurtT * dt * 2.4));
+      }
 
       // hit flash decay
       if (e.flashT > 0) {
