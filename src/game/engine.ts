@@ -1582,11 +1582,15 @@ export class Engine {
     w.aimJitX = (Math.random() - 0.5) * 2 * bloom * (0.5 + Math.random() * 0.8);
     w.aimJitY = (Math.random() - 0.5) * 2 * bloom * (0.5 + Math.random() * 0.8);
 
-    sfx.shoot(w.cfg.id as 'pistol' | 'smg', this.ads);
-    w.model.flash.visible = true;
-    (w.model.flash.material as THREE.SpriteMaterial).rotation = Math.random() * Math.PI;
+    if (w.mod.suppressed) sfx.supShot(w.cfg.id as 'pistol' | 'smg');
+    else sfx.shoot(w.cfg.id as 'pistol' | 'smg', this.ads);
+    const flMat = w.model.flash.material as THREE.SpriteMaterial;
+    const flBase = w.flashBase * w.mod.flash;
+    w.model.flash.scale.set(flBase, flBase, 1);
+    w.model.flash.visible = flMat.opacity !== 0 && w.mod.flash > 0.05;
+    flMat.rotation = Math.random() * Math.PI;
     this.flashT = 0.045;
-    this.gunLight.intensity = 26;
+    this.gunLight.intensity = 26 * w.mod.flash;
 
     // casing
     this.burst(this.tmpV2.copy(this.pos).add(new THREE.Vector3(0.15, -0.15, -0.2).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.yaw)), 'case', 1, 1, 10, 0.7);
