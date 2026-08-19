@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { sfx } from './audio';
-import { floorTexture, wallTexture, crateTexture, concreteTexture, flashTexture, dotTexture, snowGroundTexture, chainLinkTexture } from './textures';
+import { floorTexture, wallTexture, crateTexture, concreteTexture, flashTexture, dotTexture, snowGroundTexture, chainLinkTexture, roofTexture } from './textures';
 import { buildPistol, buildSMG, buildMercenary, MERC_SKINS } from './models';
 import type { WeaponModel, MercModel } from './models';
 
@@ -511,19 +511,53 @@ export class Engine {
         this.addSolid(col, 'cover');
       }
     }
-    // roof beams + partial roof panels
+    // ---- complete roof: purlins + cross ties + full-span decking ----
     for (const cx of [-26, -13, 0, 13, 26]) {
       const beam = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.55, HALF_D * 2), beamMat);
       beam.position.set(cx, 6.85, 0);
       beam.castShadow = true;
       this.scene.add(beam);
     }
-    const roofMat = new THREE.MeshStandardMaterial({ map: wallTexture(), roughness: 0.9, metalness: 0.3, side: THREE.DoubleSide, color: 0x8fa0aa });
-    for (const side of [-1, 1]) {
-      const panel = new THREE.Mesh(new THREE.PlaneGeometry(20, HALF_D * 2), roofMat);
-      panel.rotation.x = Math.PI / 2;
-      panel.position.set(side * 20.5, 7.1, 0);
-      this.scene.add(panel);
+    for (const cz of [-15, 0, 15]) {
+      const tie = new THREE.Mesh(new THREE.BoxGeometry(HALF_W * 2, 0.4, 0.35), beamMat);
+      tie.position.set(0, 6.6, cz);
+      tie.castShadow = true;
+      this.scene.add(tie);
+    }
+    const roofMat = new THREE.MeshStandardMaterial({
+      map: roofTexture(), roughness: 0.82, metalness: 0.42, side: THREE.DoubleSide, color: 0xaab4bc,
+    });
+    roofMat.map!.repeat.set(9, 6.5);
+    const deck = new THREE.Mesh(new THREE.PlaneGeometry((HALF_W + 1.2) * 2, (HALF_D + 1.2) * 2), roofMat);
+    deck.rotation.x = Math.PI / 2;
+    deck.position.set(0, 7.12, 0);
+    deck.castShadow = true; // keeps moonlight out — the interior lives on lamps and breach-light
+    deck.receiveShadow = true;
+    deck.userData.kind = 'wall';
+    this.scene.add(deck);
+    this.solidMeshes.push(deck); // rounds fired skyward end at the ceiling
+    // eave fascia for a clean silhouette from the yard
+    const fasciaMat = new THREE.MeshStandardMaterial({ color: 0x232b31, roughness: 0.6, metalness: 0.5 });
+    const mkFascia = (w: number, d: number, x: number, z: number) => {
+      const f = new THREE.Mesh(new THREE.BoxGeometry(w, 0.5, d), fasciaMat);
+      f.position.set(x, 7.0, z);
+      f.castShadow = true;
+      this.scene.add(f);
+    };
+    mkFascia((HALF_W + 1.2) * 2, 0.3, 0, -(HALF_D + 1.2));
+    mkFascia((HALF_W + 1.2) * 2, 0.3, 0, HALF_D + 1.2);
+    mkFascia(0.3, (HALF_D + 1.2) * 2, -(HALF_W + 1.2), 0);
+    mkFascia(0.3, (HALF_D + 1.2) * 2, HALF_W + 1.2, 0);
+    // rooftop vents — silhouette interest above the yard line
+    const ventMat = new THREE.MeshStandardMaterial({ color: 0x3c464e, roughness: 0.7, metalness: 0.45 });
+    for (const [vx, vz, vs] of [[-14, -8, 1], [9, 6, 0.8], [18, -12, 0.65], [-6, 12, 0.9]] as [number, number, number][]) {
+      const vent = new THREE.Mesh(new THREE.BoxGeometry(2.2 * vs, 1.1 * vs, 1.6 * vs), ventMat);
+      vent.position.set(vx, 7.12 + 0.55 * vs, vz);
+      vent.castShadow = true;
+      this.scene.add(vent);
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(2.5 * vs, 0.14, 1.9 * vs), fasciaMat);
+      cap.position.y = 0.62 * vs;
+      vent.add(cap);
     }
 
     // ---- physical cover: crate stacks ----
@@ -719,6 +753,11 @@ export class Engine {
     spill.target.position.set(0, 0, -9);
     this.scene.add(spill.target);
     this.scene.add(spill);
+
+    // faint ambient lift between lamp pools (roof keeps the moon out)
+    const fill = new THREE.PointLight(0x8fb4c8, 26, 40, 2);
+    fill.position.set(0, 5.6, 0);
+    this.scene.add(fill);
 
     // ---- yard floodlight tower: cold wash over the snowfield ----
     const tower = new THREE.Group();
