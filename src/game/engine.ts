@@ -1113,7 +1113,7 @@ export class Engine {
 
   private updatePlayer(dt: number, t: number) {
     const sprint = !!(this.keys['ShiftLeft'] || this.keys['ShiftRight']);
-    const wantAds = this.ads;
+    const wantAds = this.ads && this.curWeapon().reloadT < 0;
     const speedBase = (sprint && !wantAds ? 6.3 : 4.3) * (wantAds ? 0.55 : 1);
 
     const fwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
@@ -1208,12 +1208,18 @@ export class Engine {
     const anchor = wantAds ? w.cfg.ads : w.cfg.hip;
     const lerpF = Math.min(1, dt * (wantAds ? 13 : 10));
     const g = w.model.group;
-    g.position.x += (anchor.x + this.swayX + bobX * 0.5 - g.position.x) * lerpF;
-    g.position.y += (anchor.y + this.swayY * 0.5 + bobY * 0.6 - w.kickV * 0.012 - g.position.y) * lerpF;
-    g.position.z += (anchor.z + w.kickV * (w.cfg.auto ? 0.06 : 0.09) - g.position.z) * lerpF;
-    g.rotation.x = w.kickV * (w.cfg.auto ? 0.055 : 0.13);
-    g.rotation.z = this.swayX * 1.6 + this.recRoll * 0.5;
-    g.rotation.y = this.swayX * 1.1;
+
+    // simple reload animation: dip + roll toward the off-hand, sine envelope (no mag mesh animation)
+    const rp = w.reloadT >= 0 ? Math.min(1, w.reloadT / w.cfg.reloadTime) : -1;
+    const re = rp >= 0 ? Math.sin(Math.PI * rp) : 0;
+    const reJerk = rp >= 0 && (rp < 0.12 || rp > 0.85) ? Math.sin(rp * 140) * 0.006 : 0;
+
+    g.position.x += (anchor.x + this.swayX + bobX * 0.5 - re * 0.058 - g.position.x) * lerpF;
+    g.position.y += (anchor.y + this.swayY * 0.5 + bobY * 0.6 - w.kickV * 0.012 - re * 0.085 + reJerk - g.position.y) * lerpF;
+    g.position.z += (anchor.z + w.kickV * (w.cfg.auto ? 0.06 : 0.09) + re * 0.05 - g.position.z) * lerpF;
+    g.rotation.x = w.kickV * (w.cfg.auto ? 0.055 : 0.13) - re * 0.6;
+    g.rotation.z = this.swayX * 1.6 + this.recRoll * 0.5 - re * 0.52;
+    g.rotation.y = this.swayX * 1.1 + re * 0.24;
     w.kickV *= Math.exp(-13 * dt);
   }
 

@@ -43,6 +43,42 @@ const IconBullet = () => (
     <path d="M12 2c2.5 1.8 4 4.6 4 8v8H8v-8c0-3.4 1.5-6.2 4-8Zm-4 18h8v2H8v-2Z" />
   </svg>
 );
+const IconGear = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
+    <circle cx="12" cy="12" r="3.2" />
+    <path d="M12 2.5v2.8M12 18.7v2.8M2.5 12h2.8M18.7 12h2.8M5.3 5.3l2 2M16.7 16.7l2 2M18.7 5.3l-2 2M7.3 16.7l-2 2" />
+  </svg>
+);
+
+/* ---------- settings ---------- */
+function loadXhair(): boolean {
+  try { return localStorage.getItem('wp_xhair') !== '0'; } catch { return true; }
+}
+
+function SettingToggle({ label, desc, value, onToggle }: { label: string; desc: string; value: boolean; onToggle: () => void }) {
+  return (
+    <button
+      onClick={onToggle}
+      className="group flex w-full items-center justify-between gap-4 py-2 text-left transition-colors duration-150 hover:bg-[rgba(127,183,201,0.08)]"
+    >
+      <span>
+        <span className="block text-[12px] font-bold tracking-[0.22em] text-[#bfeaf5]">{label}</span>
+        <span className="block text-[10px] font-medium tracking-[0.14em] text-[#7fb7c9]">{desc}</span>
+      </span>
+      <span
+        className={`relative h-[22px] w-12 shrink-0 border transition-colors duration-150 ${
+          value ? 'border-[#ffab3d] bg-[rgba(255,171,61,0.16)]' : 'border-[rgba(127,183,201,0.4)] bg-[rgba(10,20,27,0.6)] group-hover:border-[#9cc3d2]'
+        }`}
+      >
+        <span
+          className={`absolute top-[3px] h-[14px] w-[22px] transition-all duration-150 ${
+            value ? 'left-[22px] bg-[#ffab3d] shadow-[0_0_9px_rgba(255,171,61,0.65)]' : 'left-[3px] bg-[#7fb7c9]'
+          }`}
+        />
+      </span>
+    </button>
+  );
+}
 
 function fmtTime(s: number) {
   const m = Math.floor(s / 60);
@@ -62,6 +98,15 @@ export default function App() {
   const [banner, setBanner] = useState<Banner | null>(null);
   const [toast, setToast] = useState<{ id: number; text: string } | null>(null);
   const [stats, setStats] = useState<EndStats | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [crosshairOn, setCrosshairOn] = useState<boolean>(loadXhair);
+  const toggleCrosshair = useCallback(() => {
+    setCrosshairOn((v) => {
+      const n = !v;
+      try { localStorage.setItem('wp_xhair', n ? '1' : '0'); } catch { /* ignore */ }
+      return n;
+    });
+  }, []);
   const feedSeq = useRef(0);
 
   const onEvent = useCallback((e: GameEvent) => {
@@ -126,7 +171,7 @@ export default function App() {
           {dmgId > 0 && <div key={dmgId} className="fx-damage absolute inset-0" />}
 
           {/* crosshair */}
-          {!hud.ads && (
+          {crosshairOn && !hud.ads && (
             <div className="absolute left-1/2 top-1/2" style={{ transform: 'translate(-50%,-50%)' }}>
               <div className="relative" style={{ width: 0, height: 0 }}>
                 <span className="ch-line" style={{ width: 2, height: 9, left: -1, top: -hud.gap - 9 }} />
@@ -137,7 +182,7 @@ export default function App() {
               </div>
             </div>
           )}
-          {hud.ads && (
+          {crosshairOn && hud.ads && (
             <span className="absolute left-1/2 top-1/2 h-[3px] w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#ffc46e] shadow-[0_0_6px_#ff9d2e]" />
           )}
 
@@ -147,16 +192,6 @@ export default function App() {
               {[45, -45, 135, -135].map((r) => (
                 <span key={r} className="absolute h-[2px] w-[9px]" style={{ background: 'currentColor', transform: `rotate(${r}deg) translateX(9px)`, boxShadow: '0 0 4px currentColor' }} />
               ))}
-            </div>
-          )}
-
-          {/* reload bar */}
-          {hud.reload >= 0 && (
-            <div className="absolute left-1/2 top-[56%] w-40 -translate-x-1/2">
-              <div className="mb-1 text-center font-display text-[11px] tracking-[0.3em] text-[#ffab3d]">REARMING</div>
-              <div className="h-[3px] w-full bg-[rgba(127,183,201,0.2)]">
-                <div className="h-full bg-[#ffab3d]" style={{ width: `${Math.round(hud.reload * 100)}%` }} />
-              </div>
             </div>
           )}
 
@@ -308,9 +343,31 @@ export default function App() {
                 ))}
               </div>
 
-              <div className="mt-7 flex items-center gap-5">
-                <button className="btn-mil text-lg" onClick={start}>DEPLOY ▸</button>
+              <div className="relative mt-7 flex items-center gap-5">
+                <button className="btn-mil text-lg" onClick={() => { setShowSettings(false); start(); }}>DEPLOY ▸</button>
+                <button
+                  className="btn-ghost flex items-center gap-2 text-xs"
+                  style={showSettings ? { borderColor: '#ffab3d', color: '#ffab3d' } : undefined}
+                  onClick={() => setShowSettings((s) => !s)}
+                >
+                  <IconGear /> SETTINGS
+                </button>
                 <span className="text-[11px] font-semibold tracking-[0.22em] text-[#7fb7c9]">MOUSE + KEYBOARD REQUIRED</span>
+
+                {showSettings && (
+                  <div className="fx-rise hud-plate absolute left-0 top-[calc(100%+12px)] z-20 w-80 px-5 py-4">
+                    <div className="flex items-baseline justify-between">
+                      <span className="font-display text-sm text-[#bfeaf5]">FIELD SETTINGS</span>
+                      <span className="text-[9px] font-bold tracking-[0.3em] text-[#7fb7c9]">SAVED LOCALLY</span>
+                    </div>
+                    <div className="mt-1 border-t border-[rgba(127,183,201,0.15)]">
+                      <SettingToggle label="CROSSHAIR" desc="ON-SCREEN RETICLE OVERLAY" value={crosshairOn} onToggle={toggleCrosshair} />
+                    </div>
+                    <div className="mt-1 border-t border-[rgba(127,183,201,0.15)] pt-2 text-[10px] font-semibold tracking-[0.16em] text-[#7fb7c9]">
+                      <span className="text-[#ff5c33]">TIP //</span> NO RETICLE? SHORT BURSTS, TRUST THE TRACERS.
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -358,7 +415,13 @@ export default function App() {
             <h2 className="font-display mt-1 text-5xl text-[#bfeaf5]">STAND BY</h2>
             <div className="mx-auto mt-3 h-[3px] w-16 bg-[#ffab3d]" />
             <p className="mt-3 text-sm font-semibold tracking-[0.14em] text-[#7fb7c9]">CURSOR RELEASED — THE STORM HOLDS ITS BREATH</p>
-            <div className="mt-7 flex flex-col items-center gap-3">
+
+            <div className="mx-auto mt-6 w-72 border-t border-[rgba(127,183,201,0.18)] px-2 pt-3">
+              <div className="text-left text-[9px] font-bold tracking-[0.32em] text-[#7fb7c9]">FIELD SETTINGS</div>
+              <SettingToggle label="CROSSHAIR" desc="ON-SCREEN RETICLE OVERLAY" value={crosshairOn} onToggle={toggleCrosshair} />
+            </div>
+
+            <div className="mt-5 flex flex-col items-center gap-3">
               <button className="btn-mil w-64" onClick={resume}>RESUME ▸</button>
               <button className="btn-ghost w-64" onClick={start}>RESTART OPERATION</button>
               <button className="btn-ghost w-64" onClick={toMenu}>ABANDON — MAIN MENU</button>
