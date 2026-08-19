@@ -964,7 +964,7 @@ export class Engine {
     w.patternSign = Math.random() < 0.2 ? -1 : 1;
     const pull = hard > 1 ? (Math.random() < 0.5 ? -1 : 1) * (0.8 + (hard - 1) * 0.55) : 1;
     this.recRoll += (Math.random() - 0.5) * w.cfg.kick * 1.35 * mv * pull;
-    this.shake = Math.min(1.5, this.shake + w.cfg.kick * (w.cfg.auto ? 13 : 30) * mv);
+    this.shake = Math.min(1.0, this.shake + w.cfg.kick * (w.cfg.auto ? 7 : 11) * mv);
     this.fovKick = Math.min(1.8, this.fovKick + (w.cfg.auto ? 0.55 : 1.2) * mv);
     w.kickV = 0.85 + Math.random() * 0.35; // muzzle flip strength varies shot to shot
     w.kickVar = 0.85 + Math.random() * 0.4;
@@ -1045,7 +1045,7 @@ export class Engine {
   private damagePlayer(d: number) {
     if (this.phase !== 'playing') return;
     this.health = Math.max(0, this.health - d);
-    this.shake = Math.min(1.4, this.shake + 0.5);
+    this.shake = Math.min(1.0, this.shake + 0.28);
     sfx.hurt();
     this.hooks.event({ type: 'damage' });
     this.hudDirty = true;
@@ -1216,7 +1216,7 @@ export class Engine {
     this.recPitch += (0 - this.recPitch) * rec;
     this.recYaw += (0 - this.recYaw) * Math.min(1, dt * 7.5);
     this.recRoll += (0 - this.recRoll) * Math.min(1, dt * 11);
-    this.shake *= Math.exp(-7 * dt);
+    this.shake *= Math.exp(-9 * dt);
     this.fovKick *= Math.exp(-9 * dt);
 
     // smooth attack: impulses ramp into the view over ~45ms instead of snapping in one frame
@@ -1225,9 +1225,9 @@ export class Engine {
     this.recYawV += (this.recYaw - this.recYawV) * att;
     this.recRollV += (this.recRoll - this.recRollV) * att;
 
-    // camera
-    const shX = Math.sin(t * 91) * this.shake * 0.012;
-    const shY = Math.cos(t * 83) * this.shake * 0.012;
+    // camera (low-frequency, small-amplitude punch — never a tremor)
+    const shX = Math.sin(t * 53) * this.shake * 0.005;
+    const shY = Math.cos(t * 47) * this.shake * 0.005;
     this.camera.position.set(this.pos.x + bobX * Math.cos(this.yaw), this.pos.y + bobY, this.pos.z - bobX * Math.sin(this.yaw));
     this.camera.rotation.set(this.pitch + this.recPitchV + shX, this.yaw + this.recYawV + shY, this.recRollV);
 
