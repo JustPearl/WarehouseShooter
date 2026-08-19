@@ -133,8 +133,9 @@ const WEAPON_CFGS: WeaponCfg[] = [
     id: 'smg', name: 'PTARMIGAN M9', short: 'PTM 9MM', auto: true,
     dmg: 13, headMul: 2.0, magSize: 30, startReserve: 150,
     fireDelay: 0.072, reloadTime: 1.75, kick: 0.0405, spread: 0.0095, bloom: 0.02, moveSpread: 0.03,
-    // long-gun hold; red dot centered at local y=+0.088, ADS far enough back to clear the stock
-    hip: new THREE.Vector3(0.26, -0.25, -0.54), ads: new THREE.Vector3(0, -0.088, -0.44), adsFov: 58,
+    // long-gun hold; model is scaled 1.2× in buildSMG, so the dot line lands at y=+0.106
+    // and the stock reaches +0.39 — ADS sits back at -0.48 to clear the camera near plane
+    hip: new THREE.Vector3(0.27, -0.26, -0.56), ads: new THREE.Vector3(0, -0.106, -0.48), adsFov: 58,
     // 9mm PDW with a folding stock: rounds 1-3 are forgiving, the pattern ramps to a steady climb
     // over ~8 rounds, then plateaus while the yaw weaves a fixed, learnable S — pull down and it
     // stays on target; hold through the whole mag and it walks up a wall

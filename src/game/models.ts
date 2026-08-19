@@ -130,9 +130,9 @@ export function buildPistol(): WeaponModel {
    PTARMIGAN M9 — original compact 9mm PDW / SMG, full-auto
    True proportions at 1.5× first-person scale (real compact PDW:
    ~47cm with stock out, ~24cm tall, ~5.5cm wide). Forward = -Z.
-   Bore axis at y=+0.006; red-dot center at y=+0.088 (engine ads.y = -0.088).
-   Total length ~74cm vs the pistol's ~32cm — a true rifle-to-sidearm ratio.
-   ============================================================ */
+    Bore axis at y=+0.006; red-dot center at y=+0.088. The whole group is scaled
+    1.2× for first-person presence (~89cm on screen, ~2.8× the pistol's ~32cm);
+    engine anchors are compensated (ads.y = -0.106, ads.z = -0.48).   ============================================================ */
 export function buildSMG(): WeaponModel {
   const g = new THREE.Group();
 
@@ -220,7 +220,12 @@ export function buildSMG(): WeaponModel {
   muzzle.position.set(0, 0.006, -0.42);
   muzzle.rotation.y = Math.PI; // gun is built facing -Z: make +Z point down the barrel
   g.add(muzzle);
-  const flash = addFlash(muzzle, 0.30);
+  const flash = addFlash(muzzle, 0.27);
+
+  // presence pass: first-person long guns read best oversized. Push the whole PDW
+  // to ~1.8× real scale (~89cm on screen) so it dominates the frame against the
+  // sidearm — engine ads/hip anchors are compensated for this scale.
+  g.scale.setScalar(1.2);
 
   return { group: g, muzzle, flash };
 }
