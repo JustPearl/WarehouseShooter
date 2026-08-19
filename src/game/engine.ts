@@ -62,6 +62,23 @@ const HALF_W = 32;
 const HALF_D = 22;
 const GRAV = 13;
 
+/** Physical recoil personality: how the gun is held and what it fires shapes the pattern. */
+interface RecoilModel {
+  caliberImpulse: number; // cartridge impulse multiplier (.45 heavy slow push = 1.0, 9mm snappy = 0.58)
+  weightKg: number; // loaded weight — heavier guns shove steadier and rattle the shooter less
+  stock: boolean; // shoulder stock: tames roll + yaw wander into a purer vertical climb
+  braced: boolean; // two-point braced hold vs free pistol grip
+  action: 'slide' | 'blowback'; // slide returns to battery with a downward snap; blowback bolt taps forward
+  pattern: 'wander' | 'climb'; // stockless sidearms wander shot-to-shot; braced guns climb with S-drift
+  climbGrow: number; // climb pattern: extra vertical gain accumulated over a burst (fraction of base)
+  climbShots: number; // climb pattern: shots to reach full climb
+  driftAmp: number; // climb pattern: S-curve yaw amplitude (fraction of impulse)
+  driftFreq: number; // climb pattern: S-curve phase per shot (rad)
+  wanderStep: number; // wander pattern: lazy yaw random-walk step (fraction of impulse)
+  rollAmp: number; // free-recoil roll (fraction of impulse)
+  varRange: number; // shot-to-shot magnitude variance (heavy calibers vary more)
+}
+
 interface WeaponCfg {
   id: string;
   name: string;
@@ -73,13 +90,14 @@ interface WeaponCfg {
   startReserve: number;
   fireDelay: number;
   reloadTime: number;
-  kick: number;
+  kick: number; // cartridge base impulse (rad), scaled by recoil.caliberImpulse
   spread: number;
   bloom: number;
   moveSpread: number;
   hip: THREE.Vector3;
   ads: THREE.Vector3;
   adsFov: number;
+  recoil: RecoilModel;
 }
 
 const WEAPON_CFGS: WeaponCfg[] = [
@@ -88,12 +106,28 @@ const WEAPON_CFGS: WeaponCfg[] = [
     dmg: 34, headMul: 2.3, magSize: 8, startReserve: 56,
     fireDelay: 0.16, reloadTime: 1.15, kick: 0.058, spread: 0.0032, bloom: 0.005, moveSpread: 0.022,
     hip: new THREE.Vector3(0.24, -0.21, -0.44), ads: new THREE.Vector3(0, -0.048, -0.3), adsFov: 64,
+    // stockless .45 in a free pistol grip: a big slow shove that wanders where it likes, heavy roll,
+    // violent slide returning to battery — every shot is its own event
+    recoil: {
+      caliberImpulse: 1.0, weightKg: 1.05, stock: false, braced: false,
+      action: 'slide', pattern: 'wander',
+      climbGrow: 0, climbShots: 1, driftAmp: 0, driftFreq: 0,
+      wanderStep: 0.62, rollAmp: 1.1, varRange: 0.55,
+    },
   },
   {
     id: 'smg', name: 'PTARMIGAN M9', short: 'PTM 9MM', auto: true,
     dmg: 13, headMul: 2.0, magSize: 30, startReserve: 150,
-    fireDelay: 0.072, reloadTime: 1.75, kick: 0.0235, spread: 0.0095, bloom: 0.02, moveSpread: 0.03,
+    fireDelay: 0.072, reloadTime: 1.75, kick: 0.0405, spread: 0.0095, bloom: 0.02, moveSpread: 0.03,
     hip: new THREE.Vector3(0.26, -0.24, -0.52), ads: new THREE.Vector3(0, -0.083, -0.36), adsFov: 58,
+    // light 9mm round in a 2.45kg braced PDW with a folding stock: snappy but controlled —
+    // early rounds kick, the burst then climbs, yaw weaving a lazy S-curve as the stock works
+    recoil: {
+      caliberImpulse: 0.58, weightKg: 2.45, stock: true, braced: true,
+      action: 'blowback', pattern: 'climb',
+      climbGrow: 0.55, climbShots: 7, driftAmp: 0.5, driftFreq: 0.85,
+      wanderStep: 0, rollAmp: 0.22, varRange: 0.36,
+    },
   },
 ];
 
@@ -113,6 +147,9 @@ interface WeaponRt {
   patternSign: number; // running sign of the horizontal recoil drift
   echoT: number; // delayed mechanical echo impulse (-1 idle)
   echoMag: number;
+  burstAcc: number; // shots in the current burst (drives climb pattern + S-curve phase)
+  driftPhase: number; // random S-curve phase per burst
+  lastFireT: number; // sim time of last shot (burst-gap detection)
 }
 
 interface Enemy {
@@ -170,6 +207,7 @@ export class Engine {
   private recPitchV = 0;
   private recYawV = 0;
   private recRollV = 0;
+  private simT = 0; // accumulated sim time in seconds (burst-gap detection)
   private shake = 0;
   private grounded = true;
   private bobPhase = 0;
@@ -561,6 +599,7 @@ export class Engine {
         cfg, model, mag: cfg.magSize, reserve: cfg.startReserve,
         cooldown: 0, heat: 0, reloadT: -1, kickV: 0, kickVis: 0, kickVar: 1,
         aimJitX: 0, aimJitY: 0, patternSign: 1, echoT: -1, echoMag: 0,
+        burstAcc: 0, driftPhase: 0, lastFireT: -1,
       });
     });
     this.gunLight = new THREE.PointLight(0xffc47a, 0, 9, 2);
@@ -712,6 +751,8 @@ export class Engine {
       w.echoT = -1;
       w.kickVis = 0;
       w.kickVar = 1;
+      w.burstAcc = 0;
+      w.lastFireT = -1;
       w.model.group.visible = i === 0;
     });
     this.gunRig.visible = true;
@@ -926,6 +967,8 @@ export class Engine {
     w.aimJitX = 0;
     w.aimJitY = 0;
     w.echoT = -1;
+    w.burstAcc = 0;
+    w.lastFireT = -1;
     w.model.group.visible = true;
     this.weaponIndex = i;
     w.kickV = 0.8;
@@ -955,22 +998,55 @@ export class Engine {
     w.heat = Math.min(1, w.heat + (w.cfg.auto ? 0.11 : 0.2));
     this.shotsFired++;
 
-    // --- recoil: vertical climb, patterned horizontal drift, per-shot character ---
-    const adsMul = this.ads ? 0.62 : 1;
-    const mv = 0.8 + Math.random() * 0.52; // every shot kicks a little differently
-    this.recPitch += w.cfg.kick * mv * (0.9 + Math.random() * 0.25) * adsMul;
-    const hard = Math.random() < 0.14 ? 2.0 + Math.random() * 1.4 : 1; // occasional hard yank
-    this.recYaw += w.patternSign * w.cfg.kick * 0.62 * hard * mv * adsMul;
-    w.patternSign = Math.random() < 0.2 ? -1 : 1;
-    const pull = hard > 1 ? (Math.random() < 0.5 ? -1 : 1) * (0.8 + (hard - 1) * 0.55) : 1;
-    this.recRoll += (Math.random() - 0.5) * w.cfg.kick * 1.35 * mv * pull;
-    this.shake = Math.min(1.0, this.shake + w.cfg.kick * (w.cfg.auto ? 7 : 11) * mv);
-    this.fovKick = Math.min(1.8, this.fovKick + (w.cfg.auto ? 0.55 : 1.2) * mv);
+    // --- physical recoil: cartridge impulse, weight, stock and grip shape the pattern ---
+    const m = w.cfg.recoil;
+    const imp = w.cfg.kick * m.caliberImpulse;
+    const adsMul = this.ads ? (m.stock ? 0.52 : 0.62) : 1; // a stock braces tighter when shouldered
+    const mv = 0.8 + Math.random() * m.varRange; // per-shot character; heavy calibers vary more
+    const weightShake = 1.12 / Math.sqrt(m.weightKg); // heavier guns rattle the shooter less
+
+    // burst memory: a braced gun accumulates a burst, a stockless sidearm resets every shot
+    if (this.simT - w.lastFireT > (m.stock ? 0.22 : 0.16)) {
+      w.burstAcc = 0;
+      w.driftPhase = Math.random() * Math.PI * 2;
+    }
+    w.lastFireT = this.simT;
+    w.burstAcc++;
+
+    let pitchI: number, yawI: number, rollI: number;
+    if (m.pattern === 'wander') {
+      // stockless pistol, free grip: a big shove that wanders — vertical punches vary wildly,
+      // yaw lazy random-walks with no fixed side, roll is heavy free-recoil twist
+      pitchI = imp * mv * (0.85 + Math.random() * 0.55);
+      if (Math.random() < 0.3) w.patternSign *= -1;
+      yawI = w.patternSign * imp * m.wanderStep * (0.45 + Math.random() * 1.5);
+      if (Math.random() < 0.13) yawI *= 2.3; // occasional hard yank off-line
+      rollI = (Math.random() - 0.5) * imp * m.rollAmp * 2.4 * (1 + (Math.random() < 0.2 ? 0.9 : 0));
+    } else {
+      // braced SMG with stock: early rounds kick, then the burst climbs; yaw weaves a lazy
+      // S-curve whose phase is random per burst — controllable, never identical twice
+      const climb = 1 + m.climbGrow * Math.min(1, w.burstAcc / m.climbShots);
+      pitchI = imp * mv * climb;
+      yawI = imp * m.driftAmp * Math.sin(w.burstAcc * m.driftFreq + w.driftPhase) * (0.65 + 0.35 * Math.random());
+      rollI = (Math.random() - 0.5) * imp * m.rollAmp;
+      if (Math.random() < 0.09) yawI *= 1.9;
+    }
+    this.recPitch += pitchI * adsMul;
+    this.recYaw += yawI * adsMul;
+    this.recRoll += rollI * adsMul * (m.stock ? 0.7 : 1);
+    this.shake = Math.min(1.0, this.shake + imp * (m.stock ? 7.5 : 11) * weightShake * mv);
+    this.fovKick = Math.min(1.8, this.fovKick + imp * (m.stock ? 23.5 : 20.7) * mv);
     w.kickV = 0.85 + Math.random() * 0.35; // muzzle flip strength varies shot to shot
     w.kickVar = 0.85 + Math.random() * 0.4;
-    // mechanical echo: a small secondary jolt as the action cycles, a few frames later
-    w.echoT = 0.05 + Math.random() * 0.055;
-    w.echoMag = w.cfg.kick * (0.22 + Math.random() * 0.4);
+    // action-cycle echo: a slide snaps back to battery with a downward jolt; a blowback bolt
+    // slaps forward with a small upward tap
+    if (m.action === 'slide') {
+      w.echoT = 0.07 + Math.random() * 0.05;
+      w.echoMag = -(imp * (0.26 + Math.random() * 0.3));
+    } else {
+      w.echoT = 0.032 + Math.random() * 0.03;
+      w.echoMag = imp * (0.14 + Math.random() * 0.14);
+    }
 
     // --- aim error lives IN the gun: recovery lag + heat bloom + movement (baked into barrel orientation) ---
     const speedXZ = Math.hypot(this.vel.x, this.vel.z);
@@ -1120,6 +1196,7 @@ export class Engine {
 
   private tick(dt: number, t: number) {
     if (this.phase === 'playing') {
+      this.simT += dt;
       this.updatePlayer(dt, t);
       this.updateWeapons(dt);
       this.updateEnemies(dt);
@@ -1242,6 +1319,7 @@ export class Engine {
     this.swayMX *= Math.exp(-12 * dt);
     this.swayY += ((Math.abs(this.swayMX) * 0.00012) - this.swayY) * Math.min(1, dt * 10);
     const adsK = wantAds ? 0.34 : 1;
+    const m = w.cfg.recoil; // stock/grip/action shape how the gun moves in the hands
     const anchor = wantAds ? w.cfg.ads : w.cfg.hip;
     const lerpF = Math.min(1, dt * (wantAds ? 13 : 10));
     const g = w.model.group;
@@ -1255,10 +1333,12 @@ export class Engine {
     // smoothed muzzle flip (ramps in, per-shot magnitude)
     w.kickVis += (w.kickV - w.kickVis) * Math.min(1, dt * 16);
     const kv = w.kickVis * w.kickVar;
-    g.position.y += (anchor.y + this.swayY * 0.5 + bobY * 0.6 - kv * 0.02 - re * 0.085 + reJerk - g.position.y) * lerpF;
-    g.position.z += (anchor.z + kv * (w.cfg.auto ? 0.075 : 0.115) + re * 0.05 - g.position.z) * lerpF;
+    // a stock pivots the gun and absorbs flip; a stockless slide pistol whips up and jumps back
+    const flipMul = m.stock ? 0.75 : 1.15;
+    g.position.y += (anchor.y + this.swayY * 0.5 + bobY * 0.6 - kv * 0.02 * flipMul - re * 0.085 + reJerk - g.position.y) * lerpF;
+    g.position.z += (anchor.z + kv * (m.stock ? 0.055 : 0.115) + re * 0.05 - g.position.z) * lerpF;
     // aim error is baked into the barrel: the gun visibly whips off-aim where the bullet actually goes
-    g.rotation.x = kv * (w.cfg.auto ? 0.11 : 0.2) - w.aimJitX * adsK - re * 0.6;
+    g.rotation.x = kv * (m.stock ? 0.085 : 0.21) * (m.action === 'slide' ? 1.1 : 1) - w.aimJitX * adsK - re * 0.6;
     g.rotation.z = this.swayX * 1.6 + this.recRoll * 0.9 - re * 0.52;
     g.rotation.y = this.swayX * 1.1 + w.aimJitY * adsK + re * 0.24;
     w.kickV *= Math.exp(-10 * dt);
@@ -1272,9 +1352,11 @@ export class Engine {
     if (w.echoT >= 0) {
       w.echoT -= dt;
       if (w.echoT < 0) {
+        // signed: slide re-chamber dips the muzzle, blowback bolt slaps it up
         this.recPitch += w.echoMag;
-        w.aimJitX = Math.min(0.05, w.aimJitX + w.echoMag * 0.8);
-        w.kickV = Math.min(1.2, w.kickV + 0.16);
+        w.aimJitX += w.echoMag * 0.5;
+        w.kickV = Math.max(-0.6, Math.min(1.2, w.kickV + (w.echoMag > 0 ? 0.16 : -0.22)));
+        this.shake = Math.min(1.0, this.shake + Math.abs(w.echoMag) * 2.2);
       }
     }
     if (w.reloadT >= 0) {

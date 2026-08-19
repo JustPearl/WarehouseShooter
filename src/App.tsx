@@ -385,7 +385,19 @@ export default function App() {
                       <span className="font-display text-lg text-[#ffab3d]">{a.name}</span>
                       <span className="text-[10px] font-bold tracking-[0.25em] text-[#7fb7c9]">{a.mode}</span>
                     </div>
-                    <p className="mt-0.5 text-[12px] font-medium text-[#7fb7c9]">{a.desc}</p>
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      {a.spec.map((s) => (
+                        <span key={s} className="border border-[rgba(127,183,201,0.28)] px-1.5 py-[2px] text-[9px] font-bold tracking-[0.16em] text-[#9cc3d2]">
+                          {s}
+                        </span>
+                      ))}
+                    </div>
+                    <p className="mt-1.5 text-[12px] font-medium text-[#7fb7c9]">{a.desc}</p>
+                    <div className="mt-2 flex items-center gap-2 text-[9px] font-bold tracking-[0.18em]">
+                      <span className="text-[#ff5c33]">RECOIL</span>
+                      <span className="h-px flex-1 bg-[rgba(127,183,201,0.18)]" />
+                      <span className="text-[#bfeaf5]">{a.recoil}</span>
+                    </div>
                     <div className="mt-2.5 space-y-1.5">
                       {a.stats.map(([label, v, amber]) => (
                         <div key={label} className="flex items-center gap-3">
@@ -471,7 +483,9 @@ const ARMORY = [
   {
     name: 'KODIAK .45',
     mode: 'SEMI-AUTO SIDEARM',
+    spec: ['.45 ACP', '1.05 KG', 'STOCKLESS', 'SLIDE ACTION'],
     desc: 'Heavy-frame depot pistol. Slow, but each .45 round hits like a sledgehammer. Iron sights, honest work.',
+    recoil: 'FREE-RECOIL WANDER — HEAVY SLIDE SNAP',
     stats: [
       ['DMG', 88, true],
       ['ROF', 34, false],
@@ -482,7 +496,9 @@ const ARMORY = [
   {
     name: 'PTARMIGAN M9',
     mode: 'FULL-AUTO PDW',
-    desc: 'Compact 9mm storm. Sprays through the blizzard — recoil climbs fast, short bursts keep it level.',
+    spec: ['9×19MM', '2.45 KG', 'FOLDING STOCK', 'BLOWBACK'],
+    desc: 'Compact 9mm storm. The stock drinks the roll — recoil climbs in a weave, short bursts keep it level.',
+    recoil: 'BRACED CLIMB — LAZY S-CURVE DRIFT',
     stats: [
       ['DMG', 40, true],
       ['ROF', 92, false],
