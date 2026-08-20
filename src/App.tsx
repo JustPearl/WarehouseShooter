@@ -10,10 +10,10 @@ const DEFAULT_HUD: HudState = {
   maxhp: 100,
   weaponIndex: 0,
   weapons: [
-    { name: 'KODIAK .45', short: 'KDK .45', mag: 8, reserve: 56, auto: false, mode: 'SEMI', atts: [] },
-    { name: 'PTARMIGAN M9', short: 'PTM 9MM', mag: 30, reserve: 150, auto: true, mode: 'AUTO', atts: [] },
-    { name: 'SABLE .38', short: 'SBL .38', mag: 5, reserve: 40, auto: false, mode: 'SEMI', atts: [] },
-    { name: 'RAVEN 12', short: 'RVN 12G', mag: 6, reserve: 36, auto: false, mode: 'SEMI', atts: [] },
+    { name: 'KODIAK .45', short: 'KDK .45', mag: 8, reserve: 56, auto: false, mode: 'SEMI', atts: [], locked: false },
+    { name: 'PTARMIGAN M9', short: 'PTM 9MM', mag: 30, reserve: 150, auto: true, mode: 'AUTO', atts: [], locked: true },
+    { name: 'SABLE .38', short: 'SBL .38', mag: 5, reserve: 40, auto: false, mode: 'SEMI', atts: [], locked: true },
+    { name: 'RAVEN 12', short: 'RVN 12G', mag: 6, reserve: 36, auto: false, mode: 'SEMI', atts: [], locked: true },
   ],
   wave: 0,
   enemiesLeft: 0,
@@ -638,9 +638,15 @@ export default function App() {
               {hud.weapons.map((x, i) => (
                 <span
                   key={x.short}
-                  className={`px-2 py-0.5 text-[10px] font-bold tracking-[0.18em] ${i === hud.weaponIndex ? 'bg-[#ffab3d] text-[#10131a]' : 'border border-[rgba(127,183,201,0.3)] text-[#7fb7c9]'}`}
+                  className={`px-2 py-0.5 text-[10px] font-bold tracking-[0.18em] ${
+                    x.locked
+                      ? 'border border-dashed border-[rgba(127,183,201,0.2)] text-[rgba(127,183,201,0.32)]'
+                      : i === hud.weaponIndex
+                        ? 'bg-[#ffab3d] text-[#10131a]'
+                        : 'border border-[rgba(127,183,201,0.3)] text-[#7fb7c9]'
+                  }`}
                 >
-                  {i + 1} {x.short}
+                  {i + 1} {x.locked ? '◌ CRATE' : x.short}
                 </span>
               ))}
             </div>
@@ -744,13 +750,19 @@ export default function App() {
                     <p className="mt-3 text-[15px] font-medium leading-relaxed text-[#9cc3d2]">
                       Prudhoe Supply Depot, Alaska. The convoy never made it. A mercenary company has taken the warehouse
                       district and they are coming through the storm in <span className="font-bold text-[#bfeaf5]">endless waves</span>.
-                      The fight spills into the <span className="font-bold text-[#bfeaf5]">fenced snow yard</span> through the gates.
-                      Crate stacks, barriers and columns stop bullets — <span className="font-bold text-[#ffab3d]">use the cover</span>,
-                      aim for the red visors, and make every round count. Hostiles now route around the depot with
-                      <span className="font-bold text-[#bfeaf5]"> real pathfinding</span> — they will flank, not stall.
+                      The fight spills into the <span className="font-bold text-[#bfeaf5]">fenced snow yard</span> and out to the
+                      <span className="font-bold text-[#bfeaf5]"> derailed rail spur</span> past the north gate — a wrecked boxcar,
+                      fuel tank and signal mast make hard cover out in the whiteout.
+                    </p>
+                    <p className="mt-3 text-[15px] font-medium leading-relaxed text-[#9cc3d2]">
+                      You deploy with <span className="font-bold text-[#ffab3d]">only the KODIAK sidearm</span>. Everything else —
+                      the carbine, the snub .38, the 12-gauge — rides in on
+                      <span className="font-bold text-[#ffab3d]"> rare supply crates dropped by the dead</span>, along with
+                      field-strip kits that sharpen every weapon you carry. Warlords always drop. Make every round count;
+                      hostiles route around the depot with <span className="font-bold text-[#bfeaf5]">real pathfinding</span> — they flank, not stall.
                     </p>
                     <div className="mt-4 border-l-2 border-[#ff5c33] pl-4 text-[12px] font-semibold tracking-[0.14em] text-[#7fb7c9]">
-                      WAVES SCALE IN NUMBER AND ARMOR. HEADSHOTS PAY +75. SUPPLY CRATES DROP FROM HOSTILES. 5S CLEAR = VITALS RESTORE.
+                      WAVES SCALE IN NUMBER AND ARMOR. HEADSHOTS PAY +75. CRATES UNLOCK WEAPONS. 5S CLEAR = VITALS RESTORE.
                     </div>
                   </section>
 

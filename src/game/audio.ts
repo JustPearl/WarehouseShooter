@@ -133,6 +133,14 @@ class Sfx {
     this.tone('square', 500, 300, 0.02, 0.14, 0.05);
   }
 
+  /** supply crate cracked open: a rising two-note arpeggio */
+  unlock() {
+    this.tone('triangle', 440, 440, 0.09, 0.3);
+    this.tone('triangle', 660, 660, 0.09, 0.3, 0.09);
+    this.tone('triangle', 880, 880, 0.14, 0.32, 0.18);
+    this.noise(0.2, 0.18, 'highpass', 2400, 3200, 0.85);
+  }
+
   /** warlord arrival: a low brass growl under the wind */
   warlord() {
     this.tone('sawtooth', 92, 44, 0.8, 0.42);

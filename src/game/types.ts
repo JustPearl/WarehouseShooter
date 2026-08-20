@@ -13,6 +13,7 @@ export interface WeaponHud {
   auto: boolean;
   atts: string[];
   mode: string; // 'SEMI' | 'AUTO' | 'BURST'
+  locked: boolean; // true until a supply crate unlocks it
 }
 
 export interface HudState {
@@ -78,7 +79,9 @@ export const EYE = 1.62;
 export const HALF_W = 32; // warehouse interior half-extents
 export const HALF_D = 22;
 export const YARD_W = 47; // fenced snow yard half-extents (playable beyond the walls)
-export const YARD_D = 37;
+export const YARD_D = 37; // south fence line
+export const WORLD_N = YARD_D + 22; // north edge — the derailed rail spur extends the battlefield
+export const RAIL_X = -20.5; // rail spur centerline (runs north-south through the new area)
 export const GRAV = 13;
 
 /* ============================== recoil ============================== */
@@ -276,6 +279,7 @@ export interface WeaponRt {
   model: WeaponModel;
   mag: number;
   reserve: number;
+  locked: boolean; // supply-crate weapons start locked; only the sidearm is issued
   cooldown: number;
   heat: number;
   reloadT: number; // -1 idle
