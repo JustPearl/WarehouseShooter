@@ -2,14 +2,14 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { sfx } from './audio';
 import { dotTexture } from './textures';
-import { buildPistol, buildSMG, buildMercenary, MERC_SKINS } from './models';
+import { buildPistol, buildSMG, buildRevolver, buildShotgun, buildMercenary, MERC_SKINS } from './models';
 import { buildAttNodes } from './attachments';
 import { FxPool } from './fx';
 import { buildLights, buildWorld, PathGrid } from './world';
 import type { Lamp } from './world';
 import {
-  EYE, HALF_W, HALF_D, YARD_W, YARD_D, GRAV,
-  NEUTRAL, ATT_MODS, ATT_MAGADD, WEAPON_CFGS, STREAK_TIERS,
+  EYE, HALF_W, HALF_D, YARD_W, YARD_D, WORLD_N, GRAV,
+  NEUTRAL, ATT_MODS, ATT_MAGADD, WEAPON_CFGS, STREAK_TIERS, PERKS,
 } from './types';
 import type {
   GamePhase, Hooks, WeaponMods, WeaponRt, Enemy, RagJoint,
@@ -27,9 +27,10 @@ const UP_Y = new THREE.Vector3(0, 1, 0);
 
 interface Pickup {
   group: THREE.Group;
-  kind: 'ammo' | 'health';
+  kind: 'ammo' | 'health' | 'crate' | 'parts';
   t: number;
   life: number;
+  meta: number; // crate: index of the weapon it unlocks
 }
 
 /* ============================== engine ============================== */
@@ -114,6 +115,16 @@ export class Engine {
   private maxAlive = 4;
   private waveState: 'inter' | 'combat' = 'inter';
   private interT = 2.2;
+  private warlordQueue = 0; // elite spawns still owed this wave
+  // --- between-wave perk draft ---
+  private choosingPerk = false;
+  private perkChoices: string[] = [];
+  private perksTaken: string[] = [];
+  private perkMult = { dmg: 1, fire: 1, reload: 1, move: 1, maxhp: 100, regen: 1, ads: 1 };
+  // --- escalating storm: worsens each wave so later fights feel heavier ---
+  private stormK = 0;
+  // --- supply economy ---
+  private partsCount = 0; // field-strip upgrades collected (each +8% damage, all weapons)
   private score = 0;
   private kills = 0;
   private headshots = 0;
@@ -195,7 +206,7 @@ export class Engine {
     for (let i = 0; i < N; i++) {
       posArr[i * 3] = (Math.random() - 0.5) * YARD_W * 2;
       posArr[i * 3 + 1] = Math.random() * 18;
-      posArr[i * 3 + 2] = (Math.random() - 0.5) * YARD_D * 2;
+      posArr[i * 3 + 2] = -WORLD_N + Math.random() * (YARD_D + WORLD_N);
       this.snowVel[i] = 1.8 + Math.random() * 2.6;
     }
     const geo = new THREE.BufferGeometry();
@@ -230,7 +241,7 @@ export class Engine {
   private buildWeapons() {
     this.gunRig = new THREE.Group();
     this.camera.add(this.gunRig);
-    const builders = [buildPistol, buildSMG];
+    const builders = [buildPistol, buildSMG, buildRevolver, buildShotgun];
     WEAPON_CFGS.forEach((cfg, i) => {
       const model = builders[i]();
       model.group.position.copy(cfg.hip);
@@ -239,6 +250,7 @@ export class Engine {
       const attNodes = buildAttNodes(model, i);
       const w: WeaponRt = {
         cfg, model, mag: cfg.magSize, reserve: cfg.startReserve,
+        locked: false,
         cooldown: 0, heat: 0, reloadT: -1, kickV: 0, kickVis: 0, kickVar: 1,
         aimJitX: 0, aimJitY: 0, echoT: -1, echoMag: 0,
         burstAcc: 0, lastFireT: -1,
@@ -261,8 +273,17 @@ export class Engine {
     this.keys[e.code] = true;
     if (this.phase !== 'playing') return;
     if (e.code === 'KeyR') this.startReload();
+    // the draft is decided with 1/2/3 — the trigger stays cold while you choose
+    if (this.choosingPerk) {
+      if (e.code === 'Digit1' && this.perkChoices[0]) this.choosePerk(this.perkChoices[0]);
+      else if (e.code === 'Digit2' && this.perkChoices[1]) this.choosePerk(this.perkChoices[1]);
+      else if (e.code === 'Digit3' && this.perkChoices[2]) this.choosePerk(this.perkChoices[2]);
+      return;
+    }
     if (e.code === 'Digit1') this.switchTo(0);
     if (e.code === 'Digit2') this.switchTo(1);
+    if (e.code === 'Digit3') this.switchTo(2);
+    if (e.code === 'Digit4') this.switchTo(3);
     if (e.code === 'KeyV') this.toggleFireMode();
     if (e.code === 'KeyF') this.melee();
   };
@@ -289,7 +310,14 @@ export class Engine {
     const now = performance.now();
     if (now - this.wheelT < 220) return;
     this.wheelT = now;
-    this.switchTo(this.weaponIndex === 0 ? 1 : 0);
+    const dir = e.deltaY > 0 ? 1 : -1;
+    // the wheel skips crate-locked weapons entirely
+    let i = (this.weaponIndex + dir + this.weapons.length) % this.weapons.length;
+    let guard = 0;
+    while (this.weapons[i].locked && guard++ < this.weapons.length) {
+      i = (i + dir + this.weapons.length) % this.weapons.length;
+    }
+    this.switchTo(i);
   };
   private onLockChange = () => {
     const locked = document.pointerLockElement === this.canvas;
@@ -356,6 +384,12 @@ export class Engine {
     this.headshots = 0;
     this.freezeT = 0;
     this.streak = 0;
+    this.warlordQueue = 0;
+    this.choosingPerk = false;
+    this.perkChoices = [];
+    this.perksTaken = [];
+    this.perkMult = { dmg: 1, fire: 1, reload: 1, move: 1, maxhp: 100, regen: 1, ads: 1 };
+    this.stormK = 0;
     this.lastKillT = -99;
     this.hbAcc = 0;
     this.nmT = 0;
@@ -366,9 +400,12 @@ export class Engine {
     this.waveState = 'inter';
     this.interT = 2.2;
     this.weaponIndex = 0;
+    this.partsCount = 0;
     this.weapons.forEach((w, i) => {
-      w.mag = w.cfg.magSize + w.mod.magAdd;
-      w.reserve = w.cfg.startReserve;
+      // only the sidearm is issued — everything else arrives in supply crates
+      w.locked = i > 0;
+      w.mag = w.locked ? 0 : w.cfg.magSize + w.mod.magAdd;
+      w.reserve = w.locked ? 0 : w.cfg.startReserve;
       w.cooldown = 0;
       w.heat = 0;
       w.reloadT = -1;
@@ -397,10 +434,11 @@ export class Engine {
     this.canvas.requestPointerLock();
   }
 
-  /** Equip attachments live. ids are prefixed 'p:' (pistol) / 's:' (SMG). */
+  /** Equip attachments live. ids are prefixed 'p:' / 's:' / 'r:' / 'q:' per weapon slot. */
   applyLoadout(ids: string[]) {
+    const prefixes = ['p', 's', 'r', 'q'];
     this.weapons.forEach((w, wi) => {
-      const pfx = wi === 0 ? 'p' : 's';
+      const pfx = prefixes[wi] ?? 'x';
       const mod: WeaponMods = { ...NEUTRAL };
       for (const raw of ids) {
         const [p, id] = raw.split(':');
@@ -462,11 +500,14 @@ export class Engine {
     this.spawnQueue = 0;
   }
 
-  private spawnEnemy() {
+  private spawnEnemy(forceRole?: Enemy['role']) {
     const anchors: [number, number][] = [
       [-43, -33], [-20, -33], [0, -33], [20, -33], [43, -33],
       [-43, 0], [43, 0],
       [-43, 33], [-20, 33], [0, 33], [20, 33], [43, 33],
+      // the freight yard — hostiles rise between the parked cars and along the fence lane
+      [-43, 35.5], [-27, 35.5], [-12, 35.5], [3, 35.5], [19, 35.5], [34, 35.5],
+      [-45, 31], [45, 31],
     ];
     let best = anchors[Math.floor(Math.random() * anchors.length)];
     for (let tries = 0; tries < 6; tries++) {
@@ -480,15 +521,20 @@ export class Engine {
     model.group.position.set(best[0] + (Math.random() - 0.5) * 3, -1.5, best[1] + (Math.random() - 0.5) * 3);
     this.scene.add(model.group);
 
-    // ---- combat archetype: rifle (default), breacher (shotgun rusher), marksman (long-range) ----
+    // ---- combat archetype: rifle, breacher, marksman, and the elite warlord ----
     const rollR = Math.random();
     const breacherW = Math.min(0.34, 0.14 + this.wave * 0.02);
     const marksmanW = Math.min(0.26, 0.1 + this.wave * 0.018);
-    const role: Enemy['role'] = rollR < breacherW ? 'breacher' : rollR < breacherW + marksmanW ? 'marksman' : 'rifle';
+    const role: Enemy['role'] =
+      forceRole ?? (rollR < breacherW ? 'breacher' : rollR < breacherW + marksmanW ? 'marksman' : 'rifle');
+
+    // warlord: a visibly bigger operator with a burning ember beacon
+    if (role === 'warlord') model.group.scale.multiplyScalar(1.14);
+
     // role beacon lamp on the left shoulder so you can read the threat at a glance
-    const lampCol = role === 'breacher' ? 0xff8b2a : role === 'marksman' ? 0x55d7ff : 0x3a4750;
+    const lampCol = role === 'warlord' ? 0xff5c33 : role === 'breacher' ? 0xff8b2a : role === 'marksman' ? 0x55d7ff : 0x3a4750;
     const lamp = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.045, 0.045, 0.05, 8),
+      new THREE.CylinderGeometry(role === 'warlord' ? 0.06 : 0.045, role === 'warlord' ? 0.06 : 0.045, 0.05, 8),
       new THREE.MeshStandardMaterial({ color: 0x111417, emissive: lampCol, emissiveIntensity: role === 'rifle' ? 0.5 : 2.2, roughness: 0.4 }),
     );
     lamp.rotation.z = Math.PI / 2;
@@ -518,12 +564,12 @@ export class Engine {
     const baseSpeed = Math.min(4.0, 2.3 + (this.wave - 1) * 0.15) * (2 - model.bulk);
     const e: Enemy = {
       id, model,
-      hp: Math.round((45 + (this.wave - 1) * 10) * model.bulk * (role === 'breacher' ? 1.35 : role === 'marksman' ? 0.85 : 1)),
+      hp: Math.round((45 + (this.wave - 1) * 10) * model.bulk * (role === 'warlord' ? 2.6 : role === 'breacher' ? 1.35 : role === 'marksman' ? 0.85 : 1)),
       state: 'rise', t: 0, strafeDir: Math.random() > 0.5 ? 1 : -1,
       strafeT: 1 + Math.random(), burst: 0, burstT: 0,
-      shotT: role === 'marksman' ? 1.6 + Math.random() : 1.2 + Math.random() * 1.2,
-      speed: baseSpeed * (role === 'breacher' ? 1.45 : role === 'marksman' ? 0.72 : 1),
-      prefDist: role === 'breacher' ? 3.5 + Math.random() * 2 : role === 'marksman' ? 19 + Math.random() * 7 : 10 + Math.random() * 6,
+      shotT: role === 'warlord' ? 0.9 + Math.random() : role === 'marksman' ? 1.6 + Math.random() : 1.2 + Math.random() * 1.2,
+      speed: baseSpeed * (role === 'warlord' ? 0.82 : role === 'breacher' ? 1.45 : role === 'marksman' ? 0.72 : 1),
+      prefDist: role === 'warlord' ? 7 + Math.random() * 3 : role === 'breacher' ? 3.5 + Math.random() * 2 : role === 'marksman' ? 19 + Math.random() * 7 : 10 + Math.random() * 6,
       walkPhase: Math.random() * 6,
       flashT: 0, flashMats, fallDir: (Math.random() - 0.5) * 0.6,
       skin, seed: Math.random() * 100, fireKick: 0, hurtT: 0, hurtX: 0, hurtZ: 0,
@@ -577,8 +623,14 @@ export class Engine {
     this.streak = this.simT - this.lastKillT < 3.5 ? this.streak + 1 : 1;
     this.lastKillT = this.simT;
     const mul = Math.min(2.5, 1 + 0.15 * (this.streak - 1));
-    const gained = Math.round((100 + this.wave * 10 + (head ? 75 : 0)) * mul);
+    const elite = e.role === 'warlord' ? 3 : 1;
+    const gained = Math.round((100 + this.wave * 10 + (head ? 75 : 0)) * mul * elite);
     this.score += gained;
+    if (e.role === 'warlord') {
+      this.freezeT = Math.max(this.freezeT, 0.12);
+      this.dropPickup(e.model.group.position.clone(), 'ammo');
+      this.hooks.event({ type: 'alert', title: 'WARLORD DOWN', sub: `+${gained} — AMMO CACHE DROPPED` });
+    }
     const tier = STREAK_TIERS.find((t) => this.streak === t.n);
     if (tier) {
       this.hooks.event({ type: 'streak', n: this.streak, label: tier.label });
@@ -595,15 +647,28 @@ export class Engine {
     }
     sfx.kill();
     this.hooks.event({ type: 'kill', weapon: melee ? 'STOCK STRIKE' : this.curWeapon().cfg.short, head });
-    // drops
+
+    // --- supply drops: rare, random, the only way new steel reaches you ---
+    const anyLocked = this.weapons.some((w) => w.locked);
     const roll = Math.random();
-    if (roll < 0.13 && this.health < 75) this.dropPickup(e.model.group.position, 'health');
-    else if (roll < 0.3) this.dropPickup(e.model.group.position, 'ammo');
+    if (e.role === 'warlord') {
+      this.dropPickup(e.model.group.position, 'ammo');
+      this.dropPickup(e.model.group.position.clone().add(this.tmpV3.set(1.2, 0, 0.6)), anyLocked ? 'crate' : 'parts');
+    } else if (roll < 0.045) {
+      this.dropPickup(e.model.group.position, 'ammo');
+    } else if (roll < 0.065 && this.health < 80) {
+      this.dropPickup(e.model.group.position, 'health');
+    } else if (roll < 0.095) {
+      this.dropPickup(e.model.group.position, anyLocked ? 'crate' : 'parts');
+    } else if (roll < 0.112) {
+      this.dropPickup(e.model.group.position, 'parts');
+    }
     this.hudDirty = true;
   }
 
-  private dropPickup(at: THREE.Vector3, kind: 'ammo' | 'health') {
+  private dropPickup(at: THREE.Vector3, kind: 'ammo' | 'health' | 'crate' | 'parts') {
     const g = new THREE.Group();
+    let meta = 0;
     if (kind === 'ammo') {
       const b = new THREE.Mesh(
         new THREE.BoxGeometry(0.42, 0.26, 0.3),
@@ -615,7 +680,7 @@ export class Engine {
         new THREE.MeshStandardMaterial({ color: 0xff9a3c, emissive: 0xff8a20, emissiveIntensity: 1.4 }),
       );
       g.add(stripe);
-    } else {
+    } else if (kind === 'health') {
       const b = new THREE.Mesh(
         new THREE.BoxGeometry(0.4, 0.26, 0.4),
         new THREE.MeshStandardMaterial({ color: 0xdfe8ea, roughness: 0.7 }),
@@ -627,10 +692,55 @@ export class Engine {
       const c2 = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.22), crossMat);
       c2.position.y = 0.14;
       g.add(c1, c2);
+    } else if (kind === 'crate') {
+      // pick a random weapon still in its crate
+      const lockedIdx = this.weapons.map((w, i) => ({ w, i })).filter((x) => x.w.locked);
+      if (!lockedIdx.length) { kind = 'parts'; }
+      else {
+        meta = lockedIdx[Math.floor(Math.random() * lockedIdx.length)].i;
+        const b = new THREE.Mesh(
+          new THREE.BoxGeometry(0.62, 0.4, 0.44),
+          new THREE.MeshStandardMaterial({ color: 0x23282d, roughness: 0.55, metalness: 0.5 }),
+        );
+        g.add(b);
+        for (const sz of [-0.1, 0.1]) {
+          const strap = new THREE.Mesh(
+            new THREE.BoxGeometry(0.66, 0.42, 0.05),
+            new THREE.MeshStandardMaterial({ color: 0xff9a3c, emissive: 0xff8a20, emissiveIntensity: 1.6 }),
+          );
+          strap.position.z = sz;
+          g.add(strap);
+        }
+        const lid = new THREE.Mesh(
+          new THREE.BoxGeometry(0.64, 0.06, 0.46),
+          new THREE.MeshStandardMaterial({ color: 0xffb35c, emissive: 0xff9a3c, emissiveIntensity: 0.9 }),
+        );
+        lid.position.y = 0.23;
+        g.add(lid);
+      }
+    }
+    if (kind === 'parts') {
+      // field-strip kit: icy toolbox with a cyan band
+      const b = new THREE.Mesh(
+        new THREE.BoxGeometry(0.42, 0.24, 0.3),
+        new THREE.MeshStandardMaterial({ color: 0x1d2a33, roughness: 0.5, metalness: 0.55 }),
+      );
+      g.add(b);
+      const band = new THREE.Mesh(
+        new THREE.BoxGeometry(0.44, 0.06, 0.32),
+        new THREE.MeshStandardMaterial({ color: 0x6fd3f2, emissive: 0x4fc0e8, emissiveIntensity: 1.5 }),
+      );
+      g.add(band);
+      const handle = new THREE.Mesh(
+        new THREE.BoxGeometry(0.18, 0.05, 0.05),
+        new THREE.MeshStandardMaterial({ color: 0x2c3a44, roughness: 0.5, metalness: 0.6 }),
+      );
+      handle.position.y = 0.15;
+      g.add(handle);
     }
     g.position.set(at.x, 0.35, at.z);
     this.scene.add(g);
-    this.pickups.push({ group: g, kind, t: Math.random() * 6, life: 25 });
+    this.pickups.push({ group: g, kind, t: Math.random() * 6, life: 25, meta });
   }
 
   /* ------------------------------ combat ------------------------------ */
@@ -639,6 +749,11 @@ export class Engine {
 
   private switchTo(i: number) {
     if (i === this.weaponIndex || i < 0 || i >= this.weapons.length) return;
+    if (this.weapons[i].locked) {
+      this.hooks.event({ type: 'pickup', text: `${this.weapons[i].cfg.name} IS CRATE-LOCKED — FIND A SUPPLY DROP` });
+      sfx.empty();
+      return;
+    }
     this.weapons[this.weaponIndex].model.group.visible = false;
     const w = this.weapons[i];
     w.reloadT = -1;
@@ -658,7 +773,8 @@ export class Engine {
     const w = this.curWeapon();
     if (w.reloadT >= 0 || w.mag >= w.cfg.magSize + w.mod.magAdd || w.reserve <= 0) return;
     w.reloadT = 0;
-    sfx.reload(w.cfg.reloadTime * w.mod.reload);
+    if (w.cfg.tubeFed) sfx.reloadGate();
+    else sfx.reload(w.cfg.reloadTime * w.mod.reload * this.perkMult.reload);
     this.hudDirty = true;
   }
 
@@ -675,6 +791,7 @@ export class Engine {
   /** Quick stock-strike: staggers and damages anything in a short cone ahead. */
   private melee() {
     const w = this.curWeapon();
+    if (this.choosingPerk) return;
     if (w.meleeT > 0 || w.reloadT >= 0) return;
     w.meleeT = 0.55;
     w.meleeK = 1;
@@ -705,7 +822,13 @@ export class Engine {
 
   private tryFire() {
     const w = this.curWeapon();
-    if (w.cooldown > 0 || w.reloadT >= 0) return;
+    if (this.choosingPerk) return; // the draft freezes the trigger
+    if (w.cooldown > 0) return;
+    if (w.reloadT >= 0) {
+      // a tube-fed gun can slam-fire whatever's already chambered, cutting the reload short
+      if (w.cfg.tubeFed && w.mag > 0) w.reloadT = -1;
+      else return;
+    }
     if (w.mag <= 0) {
       sfx.empty();
       this.startReload();
@@ -713,7 +836,7 @@ export class Engine {
       return;
     }
     w.mag--;
-    w.cooldown = w.cfg.fireDelay * w.mod.fire;
+    w.cooldown = w.cfg.fireDelay * w.mod.fire * this.perkMult.fire;
     w.heat = Math.min(1, w.heat + (w.cfg.auto ? 0.11 : 0.2));
     this.shotsFired++;
 
@@ -737,10 +860,18 @@ export class Engine {
     this.fovKick = Math.min(1.8, this.fovKick + imp * (m.stock ? 23.5 : 20.7) * brace);
     w.kickV = 0.9 + Math.random() * 0.2; // muzzle flip — mostly consistent, a hint of life
     w.kickVar = 0.92 + Math.random() * 0.16;
-    // action-cycle echo: deterministic timing, purely visual — the slide snaps / bolt slaps,
-    // but it never nudges a bullet already in flight logic
-    w.echoT = m.action === 'slide' ? 0.075 : 0.045;
-    w.echoMag = m.action === 'slide' ? -(imp * 0.28 * brace) : imp * 0.16 * brace;
+    // action-cycle echo: deterministic timing, purely visual — the slide snaps, the bolt slaps,
+    // the cylinder ratchets — but none of it nudges a bullet already in flight
+    if (m.action === 'slide') {
+      w.echoT = 0.075;
+      w.echoMag = -(imp * 0.28 * brace);
+    } else if (m.action === 'revolver') {
+      w.echoT = 0.06;
+      w.echoMag = imp * 0.10 * brace; // the next chamber indexes into line
+    } else {
+      w.echoT = 0.045;
+      w.echoMag = imp * 0.16 * brace;
+    }
 
     // --- random dispersion (the part the crosshair honestly reports): spread + heat + movement ---
     const speedXZ = Math.hypot(this.vel.x, this.vel.z);
@@ -754,8 +885,8 @@ export class Engine {
     w.aimJitX = (Math.random() - 0.5) * 2 * bloom * (0.5 + Math.random() * 0.8);
     w.aimJitY = (Math.random() - 0.5) * 2 * bloom * (0.5 + Math.random() * 0.8);
 
-    if (w.mod.suppressed) sfx.supShot(w.cfg.id as 'pistol' | 'smg');
-    else sfx.shoot(w.cfg.id as 'pistol' | 'smg', this.ads);
+    if (w.mod.suppressed) sfx.supShot(w.cfg.id as 'pistol' | 'smg' | 'revolver');
+    else sfx.shoot(w.cfg.id as 'pistol' | 'smg' | 'revolver', this.ads);
     const flMat = w.model.flash.material as THREE.SpriteMaterial;
     const flBase = w.flashBase * w.mod.flash;
     w.model.flash.scale.set(flBase, flBase, 1);
@@ -765,17 +896,44 @@ export class Engine {
     this.gunLight.intensity = 26 * w.mod.flash;
 
     // casing (ejects to the shooter's right — no per-shot allocations)
-    this.tmpV3.set(0.15, -0.15, -0.2).applyAxisAngle(UP_Y, this.yaw).add(this.pos);
-    this.fx.burst(this.tmpV3, 'case', 1, 1, 10, 0.7, this.yaw);
+    // the revolver keeps its brass in the cylinder until the speedloader reload
+    if (w.cfg.id !== 'revolver') {
+      this.tmpV3.set(0.15, -0.15, -0.2).applyAxisAngle(UP_Y, this.yaw).add(this.pos);
+      this.fx.burst(this.tmpV3, 'case', 1, 1, 10, 0.7, this.yaw);
+    }
 
     // --- hitscan: straight line out of the muzzle, exactly where the barrel points ---
     const muzzleP = w.model.muzzle.getWorldPosition(this.tmpV).clone();
     const dir = new THREE.Vector3();
     w.model.muzzle.getWorldDirection(dir);
     dir.normalize();
-    this.raycaster.set(muzzleP, dir);
-    this.raycaster.far = 150;
     const targets = this.solidMeshes.concat(this.enemyHits);
+
+    const pellets = w.cfg.pellets ?? 1;
+    if (pellets === 1) {
+      this.fireRay(w, muzzleP, dir, targets);
+    } else {
+      // shotgun: every pellet is its own straight ray inside a cone — ADS tightens the cone
+      const cone = (w.cfg.pelletSpread ?? 0.04) * w.mod.spread * (this.ads ? 0.6 : 1);
+      const right = new THREE.Vector3().crossVectors(dir, UP_Y).normalize();
+      const up = new THREE.Vector3().crossVectors(right, dir).normalize();
+      for (let i = 0; i < pellets; i++) {
+        const r = cone * Math.sqrt(Math.random());
+        const a = Math.random() * Math.PI * 2;
+        const pd = this.tmpV3.copy(dir)
+          .addScaledVector(right, Math.cos(a) * r)
+          .addScaledVector(up, Math.sin(a) * r)
+          .normalize();
+        this.fireRay(w, muzzleP, pd, targets);
+      }
+    }
+    this.hudDirty = true;
+  }
+
+  /** One hitscan projectile. Shotgun calls this once per pellet; rifles/pistols once per shot. */
+  private fireRay(w: WeaponRt, from: THREE.Vector3, dir: THREE.Vector3, targets: THREE.Mesh[]) {
+    this.raycaster.set(from, dir);
+    this.raycaster.far = 150;
     const hits = this.raycaster.intersectObjects(targets, false);
 
     let end: THREE.Vector3;
@@ -788,7 +946,13 @@ export class Engine {
         if (enemy) {
           this.shotsHit++;
           const head = ud.part === 'head';
-          this.damageEnemy(enemy, w.cfg.dmg * w.mod.dmg * (head ? w.cfg.headMul : 1), head, h.point);
+          let dmg = w.cfg.dmg * w.mod.dmg * this.perkMult.dmg * (head ? w.cfg.headMul : 1);
+          // shotgun pellets lose their punch with distance
+          if (w.cfg.falloffStart !== undefined && w.cfg.falloffEnd !== undefined) {
+            const fs = w.cfg.falloffStart, fe = w.cfg.falloffEnd, fm = w.cfg.falloffMin ?? 0.3;
+            dmg *= h.distance <= fs ? 1 : Math.max(fm, 1 - ((h.distance - fs) / (fe - fs)) * (1 - fm));
+          }
+          this.damageEnemy(enemy, dmg, head, h.point);
         }
       } else {
         if (ud.kind === 'floor') {
@@ -803,10 +967,9 @@ export class Engine {
         sfx.impact();
       }
     } else {
-      end = muzzleP.clone().addScaledVector(dir, 120);
+      end = from.clone().addScaledVector(dir, 120);
     }
-    this.fx.tracerPlayer(muzzleP, end);
-    this.hudDirty = true;
+    this.fx.tracerPlayer(from, end);
   }
 
   private damageEnemy(e: Enemy, dmg: number, head: boolean, point: THREE.Vector3, melee = false) {
@@ -875,6 +1038,11 @@ export class Engine {
       sfx.enemyMarksman(dist);
       e.fireKick = 1.1;
       this.enemyShot(muzzlePos, base, dist, 0.012, () => Math.round(10 + Math.random() * 6 + Math.min(12, this.wave)));
+    } else if (e.role === 'warlord') {
+      // the warlord's rifle is tuned: tighter bursts, heavier hits
+      sfx.enemyShoot(dist);
+      e.fireKick = 1.4;
+      this.enemyShot(muzzlePos, base, dist, 0.55, () => Math.round(7 + Math.random() * 5 + Math.min(12, this.wave)));
     } else {
       sfx.enemyShoot(dist);
       e.fireKick = 1;
@@ -936,7 +1104,10 @@ export class Engine {
 
   private tick(dt: number, t: number) {
     if (this.phase === 'playing') {
-      if (this.freezeT > 0) {
+      if (this.choosingPerk) {
+        // the draft freezes the fight: the storm keeps falling, nothing else moves
+        this.updateAmbient(dt, t);
+      } else if (this.freezeT > 0) {
         // hitstop: the world holds its breath for a beat around each kill
         this.freezeT -= dt;
         this.shake *= Math.exp(-6 * dt);
@@ -967,8 +1138,8 @@ export class Engine {
 
   private updatePlayer(dt: number, t: number) {
     // out-of-combat regen: 5s after the last hit, vitals restore at 26/s
-    if (this.health > 0 && this.health < 100 && this.simT - this.lastDamageT > 5) {
-      this.health = Math.min(100, this.health + 26 * dt);
+    if (this.health > 0 && this.health < this.perkMult.maxhp && this.simT - this.lastDamageT > 5) {
+      this.health = Math.min(this.perkMult.maxhp, this.health + 26 * this.perkMult.regen * dt);
       this.hudDirty = true;
     }
 
@@ -984,7 +1155,7 @@ export class Engine {
 
     const sprint = !!(this.keys['ShiftLeft'] || this.keys['ShiftRight']);
     const wantAds = this.ads && this.curWeapon().reloadT < 0;
-    const speedBase = (sprint && !wantAds ? 6.3 : 4.3) * (wantAds ? 0.55 : 1);
+    const speedBase = (sprint && !wantAds ? 6.3 : 4.3) * (wantAds ? 0.55 : 1) * this.perkMult.move;
 
     const fwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
@@ -1027,7 +1198,7 @@ export class Engine {
     tryAxis('x', this.vel.x * dt);
     tryAxis('z', this.vel.z * dt);
     this.pos.x = Math.max(-YARD_W + 0.9, Math.min(YARD_W - 0.9, this.pos.x));
-    this.pos.z = Math.max(-YARD_D + 0.9, Math.min(YARD_D - 0.9, this.pos.z));
+    this.pos.z = Math.max(-WORLD_N + 0.9, Math.min(YARD_D - 0.9, this.pos.z));
 
     this.pos.y += this.vel.y * dt;
     if (this.pos.y <= EYE) {
@@ -1090,7 +1261,7 @@ export class Engine {
     const inert = wantAds ? 0.16 : 1; // braced in the shoulder: the gun tracks the eye almost rigidly
     const m = w.cfg.recoil; // stock/grip/action shape how the gun moves in the hands
     const anchor = wantAds ? w.cfg.ads : w.cfg.hip;
-    const lerpF = Math.min(1, dt * (wantAds ? 26 * w.mod.adsSpeed : 13));
+    const lerpF = Math.min(1, dt * (wantAds ? 26 * w.mod.adsSpeed * this.perkMult.ads : 13));
     const g = w.model.group;
 
     // simple reload animation: dip + roll toward the off-hand, sine envelope (no mag mesh animation)
@@ -1137,12 +1308,26 @@ export class Engine {
     if (w.reloadT >= 0) {
       w.reloadT += dt;
       this.hudDirty = true;
-      if (w.reloadT >= w.cfg.reloadTime * w.mod.reload) {
-        const take = Math.min(w.reserve, w.cfg.magSize + w.mod.magAdd - w.mag);
-        w.mag += take;
-        w.reserve -= take;
-        w.reloadT = -1;
-        w.kickV = 0.7;
+      if (w.reloadT >= w.cfg.reloadTime * w.mod.reload * this.perkMult.reload) {
+        if (w.cfg.tubeFed) {
+          // one shell per cycle — keep topping the tube until it's full or the belt's dry
+          w.mag += 1;
+          w.reserve -= 1;
+          w.kickV = 0.5;
+          sfx.shell();
+          if (w.mag >= w.cfg.magSize + w.mod.magAdd || w.reserve <= 0) {
+            w.reloadT = -1;
+            w.kickV = 0.7;
+          } else {
+            w.reloadT = 0; // next shell
+          }
+        } else {
+          const take = Math.min(w.reserve, w.cfg.magSize + w.mod.magAdd - w.mag);
+          w.mag += take;
+          w.reserve -= take;
+          w.reloadT = -1;
+          w.kickV = 0.7;
+        }
         this.hudDirty = true;
       }
     }
@@ -1329,7 +1514,7 @@ export class Engine {
       const r = 0.42;
       const [nx2, nz2] = this.path.collideClamp(gp.x, gp.z, gp.x + mx * dt, gp.z + mz * dt, r);
       gp.x = Math.max(-YARD_W + 1, Math.min(YARD_W - 1, nx2));
-      gp.z = Math.max(-YARD_D + 1, Math.min(YARD_D - 1, nz2));
+      gp.z = Math.max(-WORLD_N + 1, Math.min(YARD_D - 1, nz2));
       e.model.group.rotation.y = Math.atan2(dx, dz);
 
       // stuck watchdog: if barely moving while it wants to, drop the route and repath next frame
@@ -1435,6 +1620,10 @@ export class Engine {
         this.wave++;
         this.spawnQueue = Math.min(3 + this.wave * 2, 24);
         this.maxAlive = Math.min(3 + this.wave, 8);
+        // the director owes you elites from wave 3 on — one more every third wave
+        this.warlordQueue = this.wave >= 3 ? Math.min(1 + Math.floor((this.wave - 3) / 3), 3) : 0;
+        // the storm deepens: later waves are darker, denser, harder to see through
+        this.stormK = Math.min(1, (this.wave - 1) / 14);
         this.spawnT = 0.3;
         this.waveState = 'combat';
         sfx.waveHorn();
@@ -1447,22 +1636,68 @@ export class Engine {
     if (this.spawnQueue > 0) {
       this.spawnT -= dt;
       if (this.spawnT <= 0 && alive < this.maxAlive) {
-        this.spawnEnemy();
+        // elites arrive first so the whole wave plays around them
+        const force = this.warlordQueue > 0 ? 'warlord' : undefined;
+        if (force) {
+          this.warlordQueue--;
+          sfx.warlord();
+          this.hooks.event({ type: 'alert', title: 'WARLORD', sub: 'ELITE HOSTILE INBOUND — DROP IT FIRST' });
+        }
+        this.spawnEnemy(force);
         this.spawnQueue--;
         this.spawnT = Math.max(0.55, 1.5 - this.wave * 0.06);
       }
-    } else if (alive === 0) {
+    } else if (alive === 0 && !this.choosingPerk) {
       const bonus = 200 + this.wave * 100;
       this.score += bonus;
-      this.health = Math.min(100, this.health + 30);
-      this.weapons[0].reserve += 24;
-      this.weapons[1].reserve += 90;
-      this.waveState = 'inter';
-      this.interT = 4;
+      this.health = Math.min(this.perkMult.maxhp, this.health + 30);
       sfx.waveClear();
       this.hooks.event({ type: 'waveclear', n: this.wave, bonus });
+      // hand the player a choice — this is the beat that makes the next wave worth fighting for
+      this.openPerkDraft();
       this.hudDirty = true;
     }
+  }
+
+  /* ---------- between-wave perk draft ---------- */
+  private openPerkDraft() {
+    this.choosingPerk = true;
+    const pool = PERKS.map((p) => p.id).filter((id) => !this.perksTaken.includes(id) || id === 'quarter');
+    const picks: string[] = [];
+    const copy = [...pool];
+    while (picks.length < 3 && copy.length) {
+      picks.push(copy.splice(Math.floor(Math.random() * copy.length), 1)[0]);
+    }
+    this.perkChoices = picks;
+    this.hudDirty = true;
+  }
+
+  /** Player picks one of the offered perks; applies immediately and resumes the intermission. */
+  choosePerk(id: string) {
+    if (!this.choosingPerk) return;
+    this.choosingPerk = false;
+    this.perkChoices = [];
+    this.perksTaken.push(id);
+    const m = this.perkMult;
+    switch (id) {
+      case 'heavy':   m.dmg *= 1.12; break;
+      case 'rapid':   m.fire *= 0.91; break;
+      case 'drill':   m.reload *= 0.85; break;
+      case 'boots':   m.move *= 1.08; break;
+      case 'plate':   m.maxhp += 25; this.health = Math.min(m.maxhp, this.health + 25); break;
+      case 'wind':    m.regen *= 1.4; break;
+      case 'steady':  m.ads *= 1.12; break;
+      case 'quarter': this.weapons.forEach((w) => { w.reserve = Math.round(w.reserve * 1.6) + 30; }); break;
+    }
+    // the usual intermission resupply lands with the perk
+    this.weapons[0].reserve += 24;
+    this.weapons[1].reserve += 90;
+    const def = PERKS.find((p) => p.id === id);
+    if (def) this.hooks.event({ type: 'pickup', text: `${def.name} — ${def.desc.toUpperCase()}` });
+    sfx.pickup();
+    this.waveState = 'inter';
+    this.interT = 3.2;
+    this.hudDirty = true;
   }
 
   private updatePickups(dt: number) {
@@ -1476,14 +1711,29 @@ export class Engine {
       const d = Math.hypot(p.group.position.x - this.pos.x, p.group.position.z - this.pos.z);
       if (d < 1.4) {
         if (p.kind === 'ammo') {
-          this.weapons[0].reserve += 16;
-          this.weapons[1].reserve += 60;
-          this.hooks.event({ type: 'pickup', text: 'AMMO CACHE +16 / +60' });
-        } else {
-          this.health = Math.min(100, this.health + 25);
+          for (const w of this.weapons) if (!w.locked) w.reserve += Math.round(w.cfg.startReserve * 0.35);
+          this.hooks.event({ type: 'pickup', text: 'AMMO CACHE — RESERVES RESTOCKED' });
+          sfx.pickup();
+        } else if (p.kind === 'health') {
+          this.health = Math.min(this.perkMult.maxhp, this.health + 25);
           this.hooks.event({ type: 'pickup', text: 'MEDKIT +25 HP' });
+          sfx.pickup();
+        } else if (p.kind === 'crate') {
+          // crack the crate: the weapon comes up loaded and you sling it immediately
+          const w = this.weapons[p.meta];
+          w.locked = false;
+          w.mag = w.cfg.magSize + w.mod.magAdd;
+          w.reserve = w.cfg.startReserve;
+          this.switchTo(p.meta);
+          this.hooks.event({ type: 'alert', title: 'SUPPLY CRATE', sub: `${w.cfg.name} ACQUIRED — ${w.cfg.magSize} IN THE TUBE` });
+          sfx.unlock();
+        } else {
+          // field strip: a permanent slice of extra damage across everything you carry
+          this.partsCount++;
+          this.perkMult.dmg *= 1.08;
+          this.hooks.event({ type: 'pickup', text: `FIELD STRIP +8% DAMAGE — ALL WEAPONS (TIER ${this.partsCount})` });
+          sfx.pickup();
         }
-        sfx.pickup();
         this.scene.remove(p.group);
         this.pickups.splice(i, 1);
         this.hudDirty = true;
@@ -1497,20 +1747,25 @@ export class Engine {
   }
 
   private updateAmbient(dt: number, t: number) {
-    // snow — fixed to the yard, wraps at the fence line
+    // the world itself closes in as the storm deepens wave over wave
+    (this.scene.fog as THREE.FogExp2).density = 0.017 + this.stormK * 0.007;
+
+    // snow — fixed to the yard, wraps at the fence line; falls faster and drifts harder in the storm
+    const stormFall = 1 + this.stormK * 0.55;
+    const stormDrift = 1 + this.stormK * 1.1;
     const attr = this.snow.geometry.getAttribute('position') as THREE.BufferAttribute;
     const arr = attr.array as Float32Array;
     for (let i = 0; i < this.snowVel.length; i++) {
-      arr[i * 3 + 1] -= this.snowVel[i] * dt;
-      arr[i * 3] += (1.1 + Math.sin(t * 0.6 + i) * 0.5) * dt;
+      arr[i * 3 + 1] -= this.snowVel[i] * stormFall * dt;
+      arr[i * 3] += (1.1 + Math.sin(t * 0.6 + i) * 0.5) * stormDrift * dt;
       if (arr[i * 3 + 1] < 0) {
         arr[i * 3 + 1] = 15 + Math.random() * 3;
         arr[i * 3] = (Math.random() - 0.5) * YARD_W * 2;
-        arr[i * 3 + 2] = (Math.random() - 0.5) * YARD_D * 2;
+        arr[i * 3 + 2] = -WORLD_N + Math.random() * (YARD_D + WORLD_N);
       }
       if (arr[i * 3] > YARD_W) arr[i * 3] = -YARD_W;
-      if (arr[i * 3 + 2] > YARD_D) arr[i * 3 + 2] = -YARD_D;
-      else if (arr[i * 3 + 2] < -YARD_D) arr[i * 3 + 2] = YARD_D;
+      if (arr[i * 3 + 2] > YARD_D) arr[i * 3 + 2] = -WORLD_N;
+      else if (arr[i * 3 + 2] < -WORLD_N) arr[i * 3 + 2] = YARD_D;
     }
     attr.needsUpdate = true;
 
@@ -1555,19 +1810,22 @@ export class Engine {
         name: x.cfg.name, short: x.cfg.short, mag: x.mag, reserve: x.reserve, auto: x.cfg.auto,
         mode: x.cfg.auto ? (x.mode === 0 ? 'AUTO' : 'BURST') : 'SEMI',
         atts: Object.keys(x.attNodes).filter((a) => x.attNodes[a].visible),
+        locked: x.locked,
       })),
       wave: this.wave,
       enemiesLeft: this.spawnQueue + alive,
       score: this.score,
       kills: this.kills,
-      reload: w.reloadT >= 0 ? w.reloadT / (w.cfg.reloadTime * w.mod.reload) : -1,
+      reload: w.reloadT >= 0 ? w.reloadT / (w.cfg.reloadTime * w.mod.reload * this.perkMult.reload) : -1,
       gap: this.ads ? 3 : Math.round(6 + jit * 260),
       ads: this.ads,
       atts: Object.keys(w.attNodes).filter((a) => w.attNodes[a].visible),
       sprint: !!(this.keys['ShiftLeft'] || this.keys['ShiftRight']),
-      regen: this.health < 100 && this.health > 0 && this.simT - this.lastDamageT > 5,
+      regen: this.health < this.perkMult.maxhp && this.health > 0 && this.simT - this.lastDamageT > 5,
       streak: this.streak,
       streakT: this.streak > 0 ? Math.max(0, 1 - (this.simT - this.lastKillT) / 3.5) : 0,
+      maxhp: this.perkMult.maxhp,
+      perkChoices: this.choosingPerk ? [...this.perkChoices] : null,
     });
   }
 }

@@ -13,11 +13,13 @@ export interface WeaponHud {
   auto: boolean;
   atts: string[];
   mode: string; // 'SEMI' | 'AUTO' | 'BURST'
+  locked: boolean; // true until a supply crate unlocks it
 }
 
 export interface HudState {
   phase: GamePhase;
   health: number;
+  maxhp: number; // raised by the THICK PLATE perk
   weaponIndex: number;
   weapons: WeaponHud[];
   wave: number;
@@ -32,6 +34,7 @@ export interface HudState {
   atts: string[]; // equipped attachment ids on the active weapon
   streak: number; // current kill chain (0 = none)
   streakT: number; // 1..0 — time left in the chain window
+  perkChoices: string[] | null; // 3 perk ids on offer between waves; null = not choosing
 }
 
 /** kill-chain callouts: exact counts that trigger a banner + stinger */
@@ -61,6 +64,7 @@ export type GameEvent =
   | { type: 'kill'; weapon: string; head: boolean }
   | { type: 'pickup'; text: string }
   | { type: 'streak'; n: number; label: string }
+  | { type: 'alert'; title: string; sub: string }
   | { type: 'scorepop'; text: string; x: number; y: number; head: boolean }
   | { type: 'gameover'; stats: EndStats };
 
@@ -75,7 +79,8 @@ export const EYE = 1.62;
 export const HALF_W = 32; // warehouse interior half-extents
 export const HALF_D = 22;
 export const YARD_W = 47; // fenced snow yard half-extents (playable beyond the walls)
-export const YARD_D = 37;
+export const YARD_D = 37; // south fence line
+export const WORLD_N = YARD_D; // world is symmetric again — the freight yard lives in the south strip
 export const GRAV = 13;
 
 /* ============================== recoil ============================== */
@@ -92,7 +97,7 @@ export interface RecoilModel {
   caliberImpulse: number; // cartridge impulse multiplier (.45 heavy push = 1.0, 9mm snappy = 0.58)
   weightKg: number; // loaded weight — heavier guns rattle the shooter less
   stock: boolean; // shoulder stock: tighter brace, faster settled picture
-  action: 'slide' | 'blowback'; // slide returns to battery with a snap; blowback bolt taps forward
+  action: 'slide' | 'blowback' | 'revolver'; // revolver: fixed barrel, the cylinder indexes between shots
   patternPitch: number[]; // vertical rise per shot index (fractions of the impulse)
   patternYaw: number[]; // horizontal step per shot index (signed fractions — the learnable weave)
   noise: number; // ± random fraction added to each step (keep small: realism = consistency)
@@ -146,8 +151,18 @@ export const ATT_MODS: Record<string, Partial<WeaponMods>> = {
   rdot:  { adsErr: 0.7, adsBloom: 0.8, adsSpeed: 1.18, spread: 1.12 },
   match: { fire: 0.88, recov: 1.3, noise: 1.35 },
   lslide:{ adsErr: 0.85, vert: 0.92, adsSpeed: 0.88, move: 1.1 },
+  grips: { vert: 0.82, noise: 0.8, adsSpeed: 0.9 },
+  // RAVEN 12: the choke tightens the pattern, the tube holds two more shells,
+  // the vertical foregrip reins in the 12-gauge shove
+  choke: { spread: 0.58, dmg: 0.96, adsSpeed: 0.92 },
+  tube:  { reload: 1.18, move: 1.1 },
+  fgrip: { vert: 0.72, move: 1.18, adsSpeed: 0.9 },
 };
-export const ATT_MAGADD: Record<string, [number, number]> = { xmag: [4, 10] }; // [pistol, smg]
+/** [pistol, smg, revolver, shotgun] */
+export const ATT_MAGADD: Record<string, [number, number, number, number]> = {
+  xmag: [4, 10, 2, 0],
+  tube: [0, 0, 0, 2],
+};
 
 /* ============================== weapons ============================== */
 
@@ -170,6 +185,13 @@ export interface WeaponCfg {
   ads: THREE.Vector3;
   adsFov: number;
   recoil: RecoilModel;
+  /** shotgun fields — omitted on rifles/pistols */
+  pellets?: number; // projectiles per trigger pull
+  pelletSpread?: number; // base cone radius (rad) before mods
+  falloffStart?: number; // full damage until this distance (m)
+  falloffEnd?: number; // minimum damage past this distance (m)
+  falloffMin?: number; // damage fraction at max range
+  tubeFed?: boolean; // shell-by-shell tube reload, interruptible by firing
 }
 
 export const WEAPON_CFGS: WeaponCfg[] = [
@@ -209,6 +231,44 @@ export const WEAPON_CFGS: WeaponCfg[] = [
       adsBrace: 0.42, rollAmp: 0.15,
     },
   },
+  {
+    id: 'revolver', name: 'SABLE .38', short: 'SBL .38', auto: false,
+    dmg: 44, headMul: 2.2, magSize: 5, startReserve: 40,
+    fireDelay: 0.30, reloadTime: 2.3, kick: 0.052, spread: 0.004, bloom: 0.002, moveSpread: 0.02,
+    // featherweight snub, held close; fixed sight line at local y=+0.052
+    hip: new THREE.Vector3(0.21, -0.19, -0.38), ads: new THREE.Vector3(0, -0.052, -0.30), adsFov: 62,
+    // five chambers, one turn of the cylinder: a rising staircase of heavy shoves that twists
+    // with the cylinder's indexing. Fixed barrel + no slide to cycle means every pull is its
+    // own event — the gun settles fast between shots, but the double-action pull is long
+    recoil: {
+      caliberImpulse: 0.92, weightKg: 0.75, stock: false, action: 'revolver',
+      patternPitch: [0.62, 0.70, 0.66, 0.74, 0.80],
+      patternYaw: [0.12, -0.10, 0.14, -0.12, 0.09],
+      noise: 0.12, varRange: 0.16,
+      recovDelay: 0.05, recovPitch: 9.5, recovYaw: 11,
+      adsBrace: 0.5, rollAmp: 0.42,
+    },
+  },
+  {
+    id: 'shotgun', name: 'RAVEN 12', short: 'RVN 12G', auto: false,
+    dmg: 14, headMul: 1.6, magSize: 6, startReserve: 36,
+    fireDelay: 0.62, reloadTime: 0.42, kick: 0.078, spread: 0.034, bloom: 0.006, moveSpread: 0.026,
+    pellets: 8, pelletSpread: 0.052, falloffStart: 9, falloffEnd: 24, falloffMin: 0.22, tubeFed: true,
+    // black-polymer tactical 12ga held like a carbine; ghost-ring line lands at y=+0.066 after
+    // buildShotgun's 1.15× scale — the stock welds, so ADS is pulled back to -0.50
+    hip: new THREE.Vector3(0.27, -0.26, -0.56), ads: new THREE.Vector3(0, -0.066, -0.50), adsFov: 55,
+    // 12 gauge through a 3.2kg auto-loader: a deep two-stage shove — the bolt-carrier impulse
+    // lands first, the payload push follows. Six chambers per tube, long slow recovery between
+    // strings; the yaw drifts in a wide lazy arc as the gun re-sets itself
+    recoil: {
+      caliberImpulse: 1.5, weightKg: 3.2, stock: true, action: 'blowback',
+      patternPitch: [0.82, 0.90, 0.86, 0.95, 0.92, 1.0],
+      patternYaw: [0.14, -0.12, 0.16, -0.15, 0.10, -0.08],
+      noise: 0.10, varRange: 0.12,
+      recovDelay: 0.14, recovPitch: 4.2, recovYaw: 6.0,
+      adsBrace: 0.46, rollAmp: 0.3,
+    },
+  },
 ];
 
 /* ============================== runtime state ============================== */
@@ -218,6 +278,7 @@ export interface WeaponRt {
   model: WeaponModel;
   mag: number;
   reserve: number;
+  locked: boolean; // supply-crate weapons start locked; only the sidearm is issued
   cooldown: number;
   heat: number;
   reloadT: number; // -1 idle
@@ -239,7 +300,24 @@ export interface WeaponRt {
   meleeT: number; // melee cooldown timer
 }
 
-export type EnemyRole = 'rifle' | 'breacher' | 'marksman';
+export type EnemyRole = 'rifle' | 'breacher' | 'marksman' | 'warlord';
+
+/** Between-wave upgrades. The director deals three; the player keeps one. */
+export interface PerkDef {
+  id: string;
+  name: string;
+  desc: string;
+}
+export const PERKS: PerkDef[] = [
+  { id: 'heavy',    name: 'HEAVY ROUNDS',   desc: '+12% projectile damage' },
+  { id: 'rapid',    name: 'RAPID CYCLE',    desc: '+10% fire rate on everything' },
+  { id: 'drill',    name: 'DRILL SERGEANT', desc: '−15% reload time' },
+  { id: 'boots',    name: 'LIGHT BOOTS',    desc: '+8% movement speed' },
+  { id: 'plate',    name: 'THICK PLATE',    desc: '+25 max vitals, patched up now' },
+  { id: 'wind',     name: 'SECOND WIND',    desc: '+40% vitals restore rate' },
+  { id: 'steady',   name: 'STEADY HANDS',   desc: '+12% faster sight picture' },
+  { id: 'quarter',  name: 'QUARTERMASTER',  desc: '+60% ammo reserves, delivered now' },
+];
 
 export interface RagJoint {
   o: THREE.Object3D;

@@ -87,12 +87,25 @@ class Sfx {
     s.stop(t + dur + 0.02);
   }
 
-  shoot(kind: 'pistol' | 'smg', ads: boolean) {
+  shoot(kind: 'pistol' | 'smg' | 'revolver' | 'shotgun', ads: boolean) {
     const v = ads ? 0.85 : 1;
     if (kind === 'pistol') {
       this.noise(0.16, 0.85 * v, 'lowpass', 2200, 160, 0.7);
       this.tone('sine', 150, 44, 0.13, 0.7 * v);
       this.tone('square', 800, 220, 0.03, 0.16 * v);
+    } else if (kind === 'shotgun') {
+      // 12-gauge: a wide low roar, a chest-thump, and the auto-loader's bolt clack
+      this.noise(0.26, 1.0 * v, 'lowpass', 950, 70, 0.8);
+      this.tone('sine', 96, 30, 0.22, 0.9 * v);
+      this.noise(0.08, 0.35 * v, 'bandpass', 1800, 900, 0.6, 0.02); // pellet spray
+      this.noise(0.05, 0.22 * v, 'highpass', 1600, 2600, 0.7, 0.16); // bolt cycles
+      this.tone('square', 300, 120, 0.03, 0.18 * v, 0.16);
+    } else if (kind === 'revolver') {
+      // snub .38: short-barrel boom — all low thump, sharp crack, then the cylinder click
+      this.noise(0.13, 0.9 * v, 'lowpass', 1500, 110, 0.7);
+      this.tone('sine', 132, 36, 0.12, 0.8 * v);
+      this.noise(0.045, 0.3 * v, 'highpass', 2400, 3600, 0.7);
+      this.tone('square', 1900, 700, 0.018, 0.14 * v, 0.07); // hand ratchets the cylinder
     } else {
       this.noise(0.085, 0.55 * v, 'lowpass', 3400, 420, 0.7);
       this.tone('square', 240, 90, 0.05, 0.22 * v);
@@ -101,15 +114,44 @@ class Sfx {
   }
 
   /** canned subsonic thump + gas hiss of a suppressor */
-  supShot(kind: 'pistol' | 'smg') {
-    const lp = kind === 'pistol' ? 620 : 900;
-    this.noise(0.11, kind === 'pistol' ? 0.42 : 0.3, 'lowpass', lp, lp * 0.3, 0.85);
+  supShot(kind: 'pistol' | 'smg' | 'revolver') {
+    const lp = kind === 'pistol' ? 620 : kind === 'revolver' ? 520 : 900;
+    this.noise(0.11, kind === 'smg' ? 0.3 : 0.42, 'lowpass', lp, lp * 0.3, 0.85);
     this.tone('sine', 120, 52, 0.09, 0.34);
     this.noise(0.16, 0.1, 'highpass', 3800, 5200, 0.9, 0.04); // escaping gas
+    if (kind === 'revolver') this.tone('square', 1900, 700, 0.018, 0.1, 0.06); // cylinder still clicks
   }
 
   ui() {
     this.tone('square', 560, 640, 0.022, 0.16);
+  }
+
+  /** a shotgun shell sliding into the tube + the lifter click */
+  shell() {
+    this.noise(0.05, 0.24, 'bandpass', 900, 500, 0.8);
+    this.tone('square', 220, 130, 0.04, 0.2);
+    this.tone('square', 500, 300, 0.02, 0.14, 0.05);
+  }
+
+  /** supply crate cracked open: a rising two-note arpeggio */
+  unlock() {
+    this.tone('triangle', 440, 440, 0.09, 0.3);
+    this.tone('triangle', 660, 660, 0.09, 0.3, 0.09);
+    this.tone('triangle', 880, 880, 0.14, 0.32, 0.18);
+    this.noise(0.2, 0.18, 'highpass', 2400, 3200, 0.85);
+  }
+
+  /** warlord arrival: a low brass growl under the wind */
+  warlord() {
+    this.tone('sawtooth', 92, 44, 0.8, 0.42);
+    this.tone('sawtooth', 138, 66, 0.8, 0.3, 0.06);
+    this.noise(0.6, 0.22, 'lowpass', 420, 110, 0.95);
+  }
+
+  /** opening the loading gate / racking the bolt to start a tube reload */
+  reloadGate() {
+    this.noise(0.07, 0.3, 'bandpass', 1400, 700, 0.7);
+    this.tone('square', 340, 180, 0.05, 0.2);
   }
 
   enemyShoot(dist: number) {
