@@ -278,67 +278,108 @@ export function buildRevolver(): WeaponModel {
   const wood = new THREE.MeshStandardMaterial({ color: 0x5c3a20, metalness: 0.05, roughness: 0.72 });
   const woodDark = new THREE.MeshStandardMaterial({ color: 0x3e2714, metalness: 0.05, roughness: 0.85 });
   const brass = new THREE.MeshStandardMaterial({ color: 0xb98a3e, metalness: 0.85, roughness: 0.35 });
+  const amberDot = new THREE.MeshStandardMaterial({ color: 0xff9a3c, emissive: 0xff7a1a, emissiveIntensity: 1.4 });
+  const cyl = (r: number, len: number, mat: THREE.Material, x: number, y: number, z: number, seg = 14) => {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, seg), mat);
+    m.rotation.x = Math.PI / 2; // lay the axis along the bore (Z)
+    m.position.set(x, y, z);
+    m.castShadow = true;
+    return m;
+  };
 
-  // ---- frame: main body + top strap ----
-  g.add(box(0.044, 0.070, 0.158, steel, 0, 0, 0.015)); // z -0.064..+0.094
-  g.add(box(0.034, 0.018, 0.148, steelDark, 0, 0.040, 0.020)); // top strap
-  g.add(box(0.046, 0.030, 0.030, steel, 0, -0.008, -0.060)); // frame nose where the barrel seats
+  // ---- frame: solid J-frame slab the cylinder seats into ----
+  g.add(box(0.053, 0.052, 0.132, steel, 0, 0.014, 0.006)); // z -0.060..+0.072
+  g.add(box(0.040, 0.036, 0.030, steel, 0, 0.006, 0.064)); // grip frame behind the hammer
+  // top strap with a matte rib + sight serrations
+  g.add(box(0.030, 0.009, 0.126, steelDark, 0, 0.0435, 0.004));
+  for (let i = 0; i < 5; i++) g.add(box(0.030, 0.003, 0.004, steel, 0, 0.0485, 0.036 + i * 0.009));
+  // side plate outlines + screws
+  g.add(box(0.002, 0.038, 0.102, steelDark, 0.0275, 0.012, 0.018));
+  g.add(box(0.002, 0.038, 0.102, steelDark, -0.0275, 0.012, 0.018));
+  for (const sx of [0.0285, -0.0285]) {
+    for (const [sy, sz] of [[0.026, 0.048], [-0.002, 0.032], [0.020, -0.040]] as const) {
+      const sc = new THREE.Mesh(new THREE.CylinderGeometry(0.0035, 0.0035, 0.005, 8), brass);
+      sc.rotation.z = Math.PI / 2;
+      sc.position.set(sx, sy, sz);
+      g.add(sc);
+    }
+  }
 
-  // ---- snub barrel: 2-inch stub + underlug with the ejector rod ----
-  g.add(box(0.026, 0.030, 0.090, steel, 0, 0.012, -0.112)); // z -0.157..-0.067
-  g.add(box(0.028, 0.034, 0.010, steelDark, 0, 0.012, -0.160)); // muzzle crown
-  g.add(box(0.018, 0.018, 0.078, steelDark, 0, -0.012, -0.104)); // underlug
-  const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.0045, 0.0045, 0.082, 10), steel);
-  rod.rotation.x = Math.PI / 2;
-  rod.position.set(0, -0.012, -0.102);
-  g.add(rod); // ejector rod
-  g.add(box(0.010, 0.020, 0.018, steelDark, 0, 0.037, -0.146)); // front sight ramp
-  g.add(box(0.004, 0.008, 0.010, brass, 0, 0.046, -0.146)); // brass bead
+  // ---- snub barrel: round, slightly tapered, 2-inch stub ----
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.0145, 0.0165, 0.110, 14), steel);
+  barrel.rotation.x = Math.PI / 2;
+  barrel.position.set(0, 0.012, -0.117); // z -0.172..-0.062
+  barrel.castShadow = true;
+  g.add(barrel);
+  g.add(cyl(0.0155, 0.007, steelDark, 0, 0.012, -0.168)); // muzzle crown
+  g.add(cyl(0.0175, 0.014, steelDark, 0, 0.012, -0.058)); // forcing cone into the frame
+  // ---- round underlug housing the ejector rod ----
+  g.add(cyl(0.0115, 0.086, steel, 0, -0.010, -0.105)); // z -0.148..-0.062
+  g.add(cyl(0.005, 0.014, steelDark, 0, -0.010, -0.152)); // rod tip
+  g.add(cyl(0.0065, 0.006, steelDark, 0, -0.010, -0.144)); // rod knurl
 
-  // ---- cylinder: six-sided, axis across the frame (X) ----
-  const cyl = new THREE.Mesh(new THREE.CylinderGeometry(0.0345, 0.0345, 0.060, 6), steelDark);
-  cyl.rotation.z = Math.PI / 2;
-  cyl.rotation.y = Math.PI / 6; // flats vertical
-  cyl.position.set(0, 0.010, -0.022);
-  g.add(cyl);
-  // chamber mouths hint on the front face + crane gap
-  const face = new THREE.Mesh(new THREE.CylinderGeometry(0.030, 0.030, 0.004, 6), steel);
-  face.rotation.z = Math.PI / 2;
-  face.rotation.y = Math.PI / 6;
-  face.position.set(-0.031, 0.010, -0.022);
-  g.add(face);
-  g.add(box(0.006, 0.052, 0.052, steel, 0.024, 0.010, -0.022)); // crane
-  g.add(box(0.008, 0.014, 0.024, steelDark, 0.026, 0.030, 0.004)); // cylinder latch
+  // ---- cylinder: five-shot, axis along the bore, flutes front-to-back ----
+  g.add(cyl(0.0285, 0.062, steel, 0, 0.010, -0.022, 20)); // z -0.053..+0.009
+  for (let i = 0; i < 6; i++) { // fluting
+    const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
+    const fl = box(0.011, 0.005, 0.050, steelDark, Math.cos(a) * 0.0265, 0.010 + Math.sin(a) * 0.0265, -0.022);
+    fl.rotation.z = a + Math.PI / 2;
+    g.add(fl);
+  }
+  // chamber mouths on the front face + extractor star
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2 - Math.PI / 2;
+    g.add(cyl(0.0065, 0.006, steelDark, Math.cos(a) * 0.0165, 0.010 + Math.sin(a) * 0.0165, -0.0545, 10));
+  }
+  g.add(cyl(0.007, 0.006, steelDark, 0, 0.010, -0.0545, 10));
+  g.add(box(0.002, 0.046, 0.009, steelDark, -0.0275, 0.010, -0.034)); // crane gap line
+  g.add(box(0.007, 0.013, 0.028, steelDark, -0.029, 0.030, 0.010)); // cylinder release latch
+  g.add(box(0.008, 0.004, 0.020, steel, -0.030, 0.030, 0.010));
 
-  // ---- hammer with spur + frame rear ----
-  g.add(box(0.012, 0.036, 0.018, steelDark, 0, 0.052, 0.088));
-  const spur = box(0.014, 0.008, 0.026, steelDark, 0, 0.070, 0.094);
-  spur.rotation.x = -0.55;
+  // ---- hammer with a checkered spur ----
+  g.add(box(0.013, 0.030, 0.014, steelDark, 0, 0.030, 0.074));
+  const spur = box(0.014, 0.009, 0.028, steelDark, 0, 0.050, 0.080);
+  spur.rotation.x = -0.5;
   g.add(spur);
-  for (let i = 0; i < 3; i++) g.add(box(0.016, 0.003, 0.020, steel, 0, 0.072, 0.088 + i * 0.006)); // spur serrations
+  for (let i = 0; i < 3; i++) {
+    const se = box(0.016, 0.003, 0.018, steel, 0, 0.052, 0.074 + i * 0.007);
+    se.rotation.x = -0.5;
+    g.add(se);
+  }
 
-  // ---- trigger guard + double-action trigger ----
-  const guard = new THREE.Mesh(new THREE.TorusGeometry(0.021, 0.0042, 8, 18, Math.PI), steel);
-  guard.rotation.z = Math.PI;
-  guard.rotation.y = Math.PI / 2;
-  guard.position.set(0, -0.042, -0.004);
-  g.add(guard);
-  const trig = box(0.006, 0.026, 0.010, steelDark, 0, -0.040, -0.004);
-  trig.rotation.x = 0.28;
+  // ---- front sight: pinned ramp + blade with an amber fiber dot ----
+  const ramp = box(0.013, 0.012, 0.018, steel, 0, 0.034, -0.147);
+  ramp.rotation.x = 0.35;
+  g.add(ramp);
+  g.add(box(0.006, 0.016, 0.009, steelDark, 0, 0.046, -0.143));
+  g.add(box(0.0038, 0.0038, 0.004, amberDot, 0, 0.051, -0.1485));
+
+  // ---- trigger guard + smooth double-action trigger ----
+  const guardGrp = new THREE.Group();
+  guardGrp.position.set(0, -0.016, 0.000);
+  guardGrp.rotation.y = Math.PI / 2; // ring plane spans Y-Z (finger loops fore-aft)
+  const guard = new THREE.Mesh(new THREE.TorusGeometry(0.024, 0.0055, 8, 20, Math.PI), steel);
+  guard.rotation.z = Math.PI; // hang the loop below the frame
+  guard.castShadow = true;
+  guardGrp.add(guard);
+  g.add(guardGrp);
+  g.add(box(0.014, 0.028, 0.009, steel, 0, -0.020, -0.020)); // front strap
+  const trig = box(0.005, 0.030, 0.013, steel, 0, -0.020, -0.002);
+  trig.rotation.x = 0.35;
   g.add(trig);
 
-  // ---- grip: checkered walnut, raked back ----
+  // ---- grip: raked walnut with brass medallions ----
   const grip = new THREE.Group();
   grip.position.set(0, -0.048, 0.050);
   grip.rotation.x = 0.34;
   grip.add(box(0.040, 0.100, 0.046, wood, 0, -0.052, 0));
   grip.add(box(0.044, 0.014, 0.050, steelDark, 0, -0.002, 0)); // grip frame cap
-  grip.add(box(0.042, 0.012, 0.048, woodDark, 0, -0.100, 0)); // butt base
+  grip.add(box(0.042, 0.014, 0.050, woodDark, 0, -0.102, 0)); // round butt base
   for (let i = 0; i < 4; i++) {
-    grip.add(box(0.046, 0.004, 0.004, woodDark, 0, -0.030 - i * 0.018, 0.020));
-    grip.add(box(0.046, 0.004, 0.004, woodDark, 0, -0.030 - i * 0.018, -0.020));
+    grip.add(box(0.046, 0.004, 0.004, woodDark, 0, -0.030 - i * 0.018, 0.021));
+    grip.add(box(0.046, 0.004, 0.004, woodDark, 0, -0.030 - i * 0.018, -0.021));
   }
-  const med = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, 0.002, 12), brass);
+  const med = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, 0.003, 12), brass);
   med.rotation.z = Math.PI / 2;
   med.position.set(0.0215, -0.052, 0);
   grip.add(med);
@@ -347,9 +388,9 @@ export function buildRevolver(): WeaponModel {
   grip.add(med2);
   g.add(grip);
 
-  // ---- rear sight: frame-top notch ----
-  g.add(box(0.006, 0.012, 0.014, steelDark, 0.010, 0.052, 0.072));
-  g.add(box(0.006, 0.012, 0.014, steelDark, -0.010, 0.052, 0.072));
+  // ---- rear sight: square notch cut into the top strap ----
+  g.add(box(0.007, 0.010, 0.010, steelDark, 0.009, 0.047, 0.062));
+  g.add(box(0.007, 0.010, 0.010, steelDark, -0.009, 0.047, 0.062));
 
   // ---- muzzle anchor + flash ----
   const muzzle = new THREE.Object3D();
