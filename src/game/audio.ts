@@ -87,12 +87,19 @@ class Sfx {
     s.stop(t + dur + 0.02);
   }
 
-  shoot(kind: 'pistol' | 'smg' | 'revolver', ads: boolean) {
+  shoot(kind: 'pistol' | 'smg' | 'revolver' | 'shotgun', ads: boolean) {
     const v = ads ? 0.85 : 1;
     if (kind === 'pistol') {
       this.noise(0.16, 0.85 * v, 'lowpass', 2200, 160, 0.7);
       this.tone('sine', 150, 44, 0.13, 0.7 * v);
       this.tone('square', 800, 220, 0.03, 0.16 * v);
+    } else if (kind === 'shotgun') {
+      // 12-gauge: a wide low roar, a chest-thump, and the auto-loader's bolt clack
+      this.noise(0.26, 1.0 * v, 'lowpass', 950, 70, 0.8);
+      this.tone('sine', 96, 30, 0.22, 0.9 * v);
+      this.noise(0.08, 0.35 * v, 'bandpass', 1800, 900, 0.6, 0.02); // pellet spray
+      this.noise(0.05, 0.22 * v, 'highpass', 1600, 2600, 0.7, 0.16); // bolt cycles
+      this.tone('square', 300, 120, 0.03, 0.18 * v, 0.16);
     } else if (kind === 'revolver') {
       // snub .38: short-barrel boom — all low thump, sharp crack, then the cylinder click
       this.noise(0.13, 0.9 * v, 'lowpass', 1500, 110, 0.7);
@@ -117,6 +124,19 @@ class Sfx {
 
   ui() {
     this.tone('square', 560, 640, 0.022, 0.16);
+  }
+
+  /** a shotgun shell sliding into the tube + the lifter click */
+  shell() {
+    this.noise(0.05, 0.24, 'bandpass', 900, 500, 0.8);
+    this.tone('square', 220, 130, 0.04, 0.2);
+    this.tone('square', 500, 300, 0.02, 0.14, 0.05);
+  }
+
+  /** opening the loading gate / racking the bolt to start a tube reload */
+  reloadGate() {
+    this.noise(0.07, 0.3, 'bandpass', 1400, 700, 0.7);
+    this.tone('square', 340, 180, 0.05, 0.2);
   }
 
   enemyShoot(dist: number) {

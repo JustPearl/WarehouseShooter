@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { sfx } from './audio';
 import { dotTexture } from './textures';
-import { buildPistol, buildSMG, buildRevolver, buildMercenary, MERC_SKINS } from './models';
+import { buildPistol, buildSMG, buildRevolver, buildShotgun, buildMercenary, MERC_SKINS } from './models';
 import { buildAttNodes } from './attachments';
 import { FxPool } from './fx';
 import { buildLights, buildWorld, PathGrid } from './world';
@@ -230,7 +230,7 @@ export class Engine {
   private buildWeapons() {
     this.gunRig = new THREE.Group();
     this.camera.add(this.gunRig);
-    const builders = [buildPistol, buildSMG, buildRevolver];
+    const builders = [buildPistol, buildSMG, buildRevolver, buildShotgun];
     WEAPON_CFGS.forEach((cfg, i) => {
       const model = builders[i]();
       model.group.position.copy(cfg.hip);
@@ -264,6 +264,7 @@ export class Engine {
     if (e.code === 'Digit1') this.switchTo(0);
     if (e.code === 'Digit2') this.switchTo(1);
     if (e.code === 'Digit3') this.switchTo(2);
+    if (e.code === 'Digit4') this.switchTo(3);
     if (e.code === 'KeyV') this.toggleFireMode();
     if (e.code === 'KeyF') this.melee();
   };
@@ -399,9 +400,9 @@ export class Engine {
     this.canvas.requestPointerLock();
   }
 
-  /** Equip attachments live. ids are prefixed 'p:' / 's:' / 'r:' per weapon slot. */
+  /** Equip attachments live. ids are prefixed 'p:' / 's:' / 'r:' / 'q:' per weapon slot. */
   applyLoadout(ids: string[]) {
-    const prefixes = ['p', 's', 'r'];
+    const prefixes = ['p', 's', 'r', 'q'];
     this.weapons.forEach((w, wi) => {
       const pfx = prefixes[wi] ?? 'x';
       const mod: WeaponMods = { ...NEUTRAL };
@@ -661,7 +662,8 @@ export class Engine {
     const w = this.curWeapon();
     if (w.reloadT >= 0 || w.mag >= w.cfg.magSize + w.mod.magAdd || w.reserve <= 0) return;
     w.reloadT = 0;
-    sfx.reload(w.cfg.reloadTime * w.mod.reload);
+    if (w.cfg.tubeFed) sfx.reloadGate();
+    else sfx.reload(w.cfg.reloadTime * w.mod.reload);
     this.hudDirty = true;
   }
 
@@ -708,7 +710,12 @@ export class Engine {
 
   private tryFire() {
     const w = this.curWeapon();
-    if (w.cooldown > 0 || w.reloadT >= 0) return;
+    if (w.cooldown > 0) return;
+    if (w.reloadT >= 0) {
+      // a tube-fed gun can slam-fire whatever's already chambered, cutting the reload short
+      if (w.cfg.tubeFed && w.mag > 0) w.reloadT = -1;
+      else return;
+    }
     if (w.mag <= 0) {
       sfx.empty();
       this.startReload();
@@ -787,9 +794,33 @@ export class Engine {
     const dir = new THREE.Vector3();
     w.model.muzzle.getWorldDirection(dir);
     dir.normalize();
-    this.raycaster.set(muzzleP, dir);
-    this.raycaster.far = 150;
     const targets = this.solidMeshes.concat(this.enemyHits);
+
+    const pellets = w.cfg.pellets ?? 1;
+    if (pellets === 1) {
+      this.fireRay(w, muzzleP, dir, targets);
+    } else {
+      // shotgun: every pellet is its own straight ray inside a cone — ADS tightens the cone
+      const cone = (w.cfg.pelletSpread ?? 0.04) * w.mod.spread * (this.ads ? 0.6 : 1);
+      const right = new THREE.Vector3().crossVectors(dir, UP_Y).normalize();
+      const up = new THREE.Vector3().crossVectors(right, dir).normalize();
+      for (let i = 0; i < pellets; i++) {
+        const r = cone * Math.sqrt(Math.random());
+        const a = Math.random() * Math.PI * 2;
+        const pd = this.tmpV3.copy(dir)
+          .addScaledVector(right, Math.cos(a) * r)
+          .addScaledVector(up, Math.sin(a) * r)
+          .normalize();
+        this.fireRay(w, muzzleP, pd, targets);
+      }
+    }
+    this.hudDirty = true;
+  }
+
+  /** One hitscan projectile. Shotgun calls this once per pellet; rifles/pistols once per shot. */
+  private fireRay(w: WeaponRt, from: THREE.Vector3, dir: THREE.Vector3, targets: THREE.Mesh[]) {
+    this.raycaster.set(from, dir);
+    this.raycaster.far = 150;
     const hits = this.raycaster.intersectObjects(targets, false);
 
     let end: THREE.Vector3;
@@ -802,7 +833,13 @@ export class Engine {
         if (enemy) {
           this.shotsHit++;
           const head = ud.part === 'head';
-          this.damageEnemy(enemy, w.cfg.dmg * w.mod.dmg * (head ? w.cfg.headMul : 1), head, h.point);
+          let dmg = w.cfg.dmg * w.mod.dmg * (head ? w.cfg.headMul : 1);
+          // shotgun pellets lose their punch with distance
+          if (w.cfg.falloffStart !== undefined && w.cfg.falloffEnd !== undefined) {
+            const fs = w.cfg.falloffStart, fe = w.cfg.falloffEnd, fm = w.cfg.falloffMin ?? 0.3;
+            dmg *= h.distance <= fs ? 1 : Math.max(fm, 1 - ((h.distance - fs) / (fe - fs)) * (1 - fm));
+          }
+          this.damageEnemy(enemy, dmg, head, h.point);
         }
       } else {
         if (ud.kind === 'floor') {
@@ -817,10 +854,9 @@ export class Engine {
         sfx.impact();
       }
     } else {
-      end = muzzleP.clone().addScaledVector(dir, 120);
+      end = from.clone().addScaledVector(dir, 120);
     }
-    this.fx.tracerPlayer(muzzleP, end);
-    this.hudDirty = true;
+    this.fx.tracerPlayer(from, end);
   }
 
   private damageEnemy(e: Enemy, dmg: number, head: boolean, point: THREE.Vector3, melee = false) {
@@ -1152,11 +1188,25 @@ export class Engine {
       w.reloadT += dt;
       this.hudDirty = true;
       if (w.reloadT >= w.cfg.reloadTime * w.mod.reload) {
-        const take = Math.min(w.reserve, w.cfg.magSize + w.mod.magAdd - w.mag);
-        w.mag += take;
-        w.reserve -= take;
-        w.reloadT = -1;
-        w.kickV = 0.7;
+        if (w.cfg.tubeFed) {
+          // one shell per cycle — keep topping the tube until it's full or the belt's dry
+          w.mag += 1;
+          w.reserve -= 1;
+          w.kickV = 0.5;
+          sfx.shell();
+          if (w.mag >= w.cfg.magSize + w.mod.magAdd || w.reserve <= 0) {
+            w.reloadT = -1;
+            w.kickV = 0.7;
+          } else {
+            w.reloadT = 0; // next shell
+          }
+        } else {
+          const take = Math.min(w.reserve, w.cfg.magSize + w.mod.magAdd - w.mag);
+          w.mag += take;
+          w.reserve -= take;
+          w.reloadT = -1;
+          w.kickV = 0.7;
+        }
         this.hudDirty = true;
       }
     }

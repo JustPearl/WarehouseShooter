@@ -147,8 +147,17 @@ export const ATT_MODS: Record<string, Partial<WeaponMods>> = {
   match: { fire: 0.88, recov: 1.3, noise: 1.35 },
   lslide:{ adsErr: 0.85, vert: 0.92, adsSpeed: 0.88, move: 1.1 },
   grips: { vert: 0.82, noise: 0.8, adsSpeed: 0.9 },
+  // RAVEN 12: the choke tightens the pattern, the tube holds two more shells,
+  // the vertical foregrip reins in the 12-gauge shove
+  choke: { spread: 0.58, dmg: 0.96, adsSpeed: 0.92 },
+  tube:  { reload: 1.18, move: 1.1 },
+  fgrip: { vert: 0.72, move: 1.18, adsSpeed: 0.9 },
 };
-export const ATT_MAGADD: Record<string, [number, number, number]> = { xmag: [4, 10, 2] }; // [pistol, smg, revolver]
+/** [pistol, smg, revolver, shotgun] */
+export const ATT_MAGADD: Record<string, [number, number, number, number]> = {
+  xmag: [4, 10, 2, 0],
+  tube: [0, 0, 0, 2],
+};
 
 /* ============================== weapons ============================== */
 
@@ -171,6 +180,13 @@ export interface WeaponCfg {
   ads: THREE.Vector3;
   adsFov: number;
   recoil: RecoilModel;
+  /** shotgun fields — omitted on rifles/pistols */
+  pellets?: number; // projectiles per trigger pull
+  pelletSpread?: number; // base cone radius (rad) before mods
+  falloffStart?: number; // full damage until this distance (m)
+  falloffEnd?: number; // minimum damage past this distance (m)
+  falloffMin?: number; // damage fraction at max range
+  tubeFed?: boolean; // shell-by-shell tube reload, interruptible by firing
 }
 
 export const WEAPON_CFGS: WeaponCfg[] = [
@@ -226,6 +242,26 @@ export const WEAPON_CFGS: WeaponCfg[] = [
       noise: 0.12, varRange: 0.16,
       recovDelay: 0.05, recovPitch: 9.5, recovYaw: 11,
       adsBrace: 0.5, rollAmp: 0.42,
+    },
+  },
+  {
+    id: 'shotgun', name: 'RAVEN 12', short: 'RVN 12G', auto: false,
+    dmg: 14, headMul: 1.6, magSize: 6, startReserve: 36,
+    fireDelay: 0.62, reloadTime: 0.42, kick: 0.078, spread: 0.034, bloom: 0.006, moveSpread: 0.026,
+    pellets: 8, pelletSpread: 0.052, falloffStart: 9, falloffEnd: 24, falloffMin: 0.22, tubeFed: true,
+    // black-polymer tactical 12ga held like a carbine; ghost-ring line lands at y=+0.066 after
+    // buildShotgun's 1.15× scale — the stock welds, so ADS is pulled back to -0.50
+    hip: new THREE.Vector3(0.27, -0.26, -0.56), ads: new THREE.Vector3(0, -0.066, -0.50), adsFov: 55,
+    // 12 gauge through a 3.2kg auto-loader: a deep two-stage shove — the bolt-carrier impulse
+    // lands first, the payload push follows. Six chambers per tube, long slow recovery between
+    // strings; the yaw drifts in a wide lazy arc as the gun re-sets itself
+    recoil: {
+      caliberImpulse: 1.5, weightKg: 3.2, stock: true, action: 'blowback',
+      patternPitch: [0.82, 0.90, 0.86, 0.95, 0.92, 1.0],
+      patternYaw: [0.14, -0.12, 0.16, -0.15, 0.10, -0.08],
+      noise: 0.10, varRange: 0.12,
+      recovDelay: 0.14, recovPitch: 4.2, recovYaw: 6.0,
+      adsBrace: 0.46, rollAmp: 0.3,
     },
   },
 ];

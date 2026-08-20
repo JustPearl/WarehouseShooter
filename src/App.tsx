@@ -11,6 +11,7 @@ const DEFAULT_HUD: HudState = {
     { name: 'KODIAK .45', short: 'KDK .45', mag: 8, reserve: 56, auto: false, mode: 'SEMI', atts: [] },
     { name: 'PTARMIGAN M9', short: 'PTM 9MM', mag: 30, reserve: 150, auto: true, mode: 'AUTO', atts: [] },
     { name: 'SABLE .38', short: 'SBL .38', mag: 5, reserve: 40, auto: false, mode: 'SEMI', atts: [] },
+    { name: 'RAVEN 12', short: 'RVN 12G', mag: 6, reserve: 36, auto: false, mode: 'SEMI', atts: [] },
   ],
   wave: 0,
   enemiesLeft: 0,
@@ -65,28 +66,36 @@ function loadSens(): number {
     return Number.isFinite(v) && v > 0 ? v : 1;
   } catch { return 1; }
 }
-function loadLoadout(): { p: string[]; s: string[]; r: string[] } {
+function loadLoadout(): { p: string[]; s: string[]; r: string[]; q: string[] } {
   try {
     const raw = JSON.parse(localStorage.getItem('wp_loadout') || '');
     if (raw && Array.isArray(raw.p) && Array.isArray(raw.s)) {
-      return { p: raw.p, s: raw.s, r: Array.isArray(raw.r) ? raw.r : [] };
+      return {
+        p: raw.p, s: raw.s,
+        r: Array.isArray(raw.r) ? raw.r : [],
+        q: Array.isArray(raw.q) ? raw.q : [],
+      };
     }
   } catch { /* ignore */ }
-  return { p: [], s: [], r: [] };
+  return { p: [], s: [], r: [], q: [] };
 }
 
 /* ---------- attachment catalog (ids match the engine's ATT_MODS) ---------- */
-interface AttDef { id: string; name: string; slot: string; weapon: 'p' | 's' | 'r' | 'both'; good: string; bad: string }
+type Wk = 'p' | 's' | 'r' | 'q';
+interface AttDef { id: string; name: string; slot: string; weapon: Wk[]; good: string; bad: string }
 const ATTACHMENTS: AttDef[] = [
-  { id: 'supp',   name: 'MONOBLOC SUPPRESSOR',   slot: 'MUZZLE',     weapon: 'both', good: 'RECOIL −12% · FLASH TAMED · SUBSONIC REPORT', bad: 'DAMAGE −8% · SLOWER SIGHT RAISE' },
-  { id: 'comp',   name: 'AGGRESSOR COMPENSATOR', slot: 'MUZZLE',     weapon: 'both', good: 'VERTICAL RECOIL −25%',                        bad: 'SPREAD +30% · LOUDER FLASH CONE' },
-  { id: 'xmag',   name: 'EXTENDED MAG / CYL.',   slot: 'MAGAZINE',   weapon: 'both', good: '+4 (.45) / +10 (9MM) / +2 (.38) ROUNDS',      bad: 'RELOAD +25% · SLOWER HANDLING' },
-  { id: 'laser',  name: 'TACTICAL LASER',        slot: 'UNDERBARREL', weapon: 'both', good: 'HIP-FIRE BLOOM −45% · MOVE PENALTY −50%',     bad: 'RECOIL +5–8% · BEAM GIVES YOU AWAY' },
-  { id: 'vgrip',  name: 'ANGLED GRIP',           slot: 'UNDERBARREL', weapon: 's',    good: 'VERTICAL RECOIL −22%',                        bad: 'MOVE PENALTY +22% · SLOWER ADS' },
-  { id: 'rdot',   name: 'MINI REFLEX SIGHT',     slot: 'OPTIC',      weapon: 's',    good: 'SNAPPIER SIGHT PICTURE · −30% ADS LAG',       bad: 'HIP SPREAD +12% · TOP-HEAVY' },
-  { id: 'match',  name: 'MATCH TRIGGER',         slot: 'INTERNAL',   weapon: 'p',    good: 'FIRE RATE +12% · FASTER RECOVERY',            bad: 'SHOT CONSISTENCY −35%' },
-  { id: 'lslide', name: 'LONGSLIDE KIT',         slot: 'INTERNAL',   weapon: 'p',    good: '−15% ADS LAG · RECOIL −8%',                   bad: 'SLOWER SIGHT RAISE · HEAVY FRONT' },
-  { id: 'grips',  name: 'TARGET GRIPS',          slot: 'GRIP',       weapon: 'r',    good: 'RECOIL −18% · TIGHTER PULL SPREAD',           bad: 'SLIGHTLY SLOWER SIGHT RAISE' },
+  { id: 'supp',   name: 'MONOBLOC SUPPRESSOR',   slot: 'MUZZLE',     weapon: ['p', 's'],          good: 'RECOIL −12% · FLASH TAMED · SUBSONIC REPORT', bad: 'DAMAGE −8% · SLOWER SIGHT RAISE' },
+  { id: 'comp',   name: 'AGGRESSOR COMPENSATOR', slot: 'MUZZLE',     weapon: ['p', 's'],          good: 'VERTICAL RECOIL −25%',                        bad: 'SPREAD +30% · LOUDER FLASH CONE' },
+  { id: 'choke',  name: 'TACTICAL CHOKE',        slot: 'MUZZLE',     weapon: ['q'],               good: 'PELLET PATTERN −42%',                         bad: 'DAMAGE −4% · SLOWER SIGHT RAISE' },
+  { id: 'xmag',   name: 'EXTENDED MAG / CYL.',   slot: 'MAGAZINE',   weapon: ['p', 's', 'r'],     good: '+4 (.45) / +10 (9MM) / +2 (.38) ROUNDS',      bad: 'RELOAD +25% · SLOWER HANDLING' },
+  { id: 'tube',   name: 'TUBE EXTENSION',        slot: 'MAGAZINE',   weapon: ['q'],               good: '+2 SHELLS IN THE TUBE',                       bad: 'RELOAD +18% · MUZZLE-HEAVY' },
+  { id: 'laser',  name: 'TACTICAL LASER',        slot: 'UNDERBARREL', weapon: ['p', 's', 'r', 'q'], good: 'HIP-FIRE BLOOM −45% · MOVE PENALTY −50%',    bad: 'RECOIL +5–8% · BEAM GIVES YOU AWAY' },
+  { id: 'vgrip',  name: 'ANGLED GRIP',           slot: 'UNDERBARREL', weapon: ['s'],              good: 'VERTICAL RECOIL −22%',                        bad: 'MOVE PENALTY +22% · SLOWER ADS' },
+  { id: 'fgrip',  name: 'VERTICAL FOREGRIP',     slot: 'UNDERBARREL', weapon: ['q'],              good: 'VERTICAL RECOIL −28%',                        bad: 'MOVE PENALTY +18% · SLOWER ADS' },
+  { id: 'rdot',   name: 'MINI REFLEX SIGHT',     slot: 'OPTIC',      weapon: ['s', 'q'],          good: 'SNAPPIER SIGHT PICTURE · −30% ADS LAG',       bad: 'HIP SPREAD +12% · TOP-HEAVY' },
+  { id: 'match',  name: 'MATCH TRIGGER',         slot: 'INTERNAL',   weapon: ['p'],               good: 'FIRE RATE +12% · FASTER RECOVERY',            bad: 'SHOT CONSISTENCY −35%' },
+  { id: 'lslide', name: 'LONGSLIDE KIT',         slot: 'INTERNAL',   weapon: ['p'],               good: '−15% ADS LAG · RECOIL −8%',                   bad: 'SLOWER SIGHT RAISE · HEAVY FRONT' },
+  { id: 'grips',  name: 'TARGET GRIPS',          slot: 'GRIP',       weapon: ['r'],               good: 'RECOIL −18% · TIGHTER PULL SPREAD',           bad: 'SLIGHTLY SLOWER SIGHT RAISE' },
 ];
 
 function SettingToggle({ label, desc, value, onToggle }: { label: string; desc: string; value: boolean; onToggle: () => void }) {
@@ -118,17 +127,17 @@ function SettingToggle({ label, desc, value, onToggle }: { label: string; desc: 
 function LoadoutPanel({
   loadout, onToggle,
 }: {
-  loadout: { p: string[]; s: string[]; r: string[] };
-  onToggle: (w: 'p' | 's' | 'r', id: string) => void;
+  loadout: { p: string[]; s: string[]; r: string[]; q: string[] };
+  onToggle: (w: Wk, id: string) => void;
 }) {
-  const col = (wk: 'p' | 's' | 'r', title: string, sub: string) => (
-    <div className="hud-plate min-w-0 flex-1 px-5 py-4">
+  const col = (wk: Wk, title: string, sub: string) => (
+    <div className="hud-plate min-w-0 px-5 py-4">
       <div className="flex items-baseline justify-between">
         <span className="font-display text-lg text-[#ffab3d]">{title}</span>
         <span className="text-[9px] font-bold tracking-[0.26em] text-[#7fb7c9]">{sub}</span>
       </div>
       <div className="mt-3 space-y-2">
-        {ATTACHMENTS.filter((a) => a.weapon === wk || a.weapon === 'both').map((a) => {
+        {ATTACHMENTS.filter((a) => a.weapon.includes(wk)).map((a) => {
           const equipped = loadout[wk].includes(a.id);
           const conflict = !equipped && loadout[wk].some((x) => ATTACHMENTS.find((y) => y.id === x)?.slot === a.slot);
           return (
@@ -162,10 +171,11 @@ function LoadoutPanel({
   );
 
   return (
-    <div className="flex w-full max-w-6xl flex-col gap-4 lg:flex-row">
+    <div className="grid w-full max-w-6xl grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
       {col('p', 'KODIAK .45', 'SIDEARM')}
       {col('s', 'PTARMIGAN M9', 'PRIMARY')}
       {col('r', 'SABLE .38', 'SNUB REVOLVER')}
+      {col('q', 'RAVEN 12', 'TACTICAL 12G')}
     </div>
   );
 }
@@ -298,10 +308,10 @@ export default function App() {
   const [manualSec, setManualSec] = useState('brief');
   const [crosshairOn, setCrosshairOn] = useState<boolean>(loadXhair);
   const [sens, setSens] = useState<number>(loadSens);
-  const [loadout, setLoadout] = useState<{ p: string[]; s: string[]; r: string[] }>(loadLoadout);
+  const [loadout, setLoadout] = useState<{ p: string[]; s: string[]; r: string[]; q: string[] }>(loadLoadout);
   const [showLoadout, setShowLoadout] = useState(false);
 
-  const toggleAtt = useCallback((wk: 'p' | 's' | 'r', id: string) => {
+  const toggleAtt = useCallback((wk: Wk, id: string) => {
     setLoadout((prev) => {
       const list = prev[wk];
       let next: string[];
@@ -313,7 +323,7 @@ export default function App() {
       }
       const merged = { ...prev, [wk]: next };
       try { localStorage.setItem('wp_loadout', JSON.stringify(merged)); } catch { /* ignore */ }
-      engineRef.current?.applyLoadout([...merged.p.map((x) => `p:${x}`), ...merged.s.map((x) => `s:${x}`), ...merged.r.map((x) => `r:${x}`)]);
+      engineRef.current?.applyLoadout([...merged.p.map((x) => `p:${x}`), ...merged.s.map((x) => `s:${x}`), ...merged.r.map((x) => `r:${x}`), ...merged.q.map((x) => `q:${x}`)]);
       sfx.ui();
       return merged;
     });
@@ -372,7 +382,7 @@ export default function App() {
     engine.boot();
     engine.setSensitivity(loadSens());
     const lo = loadLoadout();
-    engine.applyLoadout([...lo.p.map((x) => `p:${x}`), ...lo.s.map((x) => `s:${x}`), ...lo.r.map((x) => `r:${x}`)]);
+    engine.applyLoadout([...lo.p.map((x) => `p:${x}`), ...lo.s.map((x) => `s:${x}`), ...lo.r.map((x) => `r:${x}`), ...lo.q.map((x) => `q:${x}`)]);
     return () => {
       engine.dispose();
       engineRef.current = null;
@@ -683,7 +693,7 @@ export default function App() {
                   <section id="fm-controls" className="mt-10 max-w-2xl scroll-mt-4">
                     <div className="text-[10px] font-bold tracking-[0.4em] text-[#ffab3d]">02 // CONTROLS</div>
                     <div className="hud-plate mt-4 grid grid-cols-1 gap-x-8 gap-y-1.5 px-5 py-4 text-[12px] font-semibold tracking-[0.12em] text-[#9cc3d2] sm:grid-cols-2">
-                      {([['W A S D', 'MOVE'], ['MOUSE', 'AIM — CURSOR LOCKS'], ['LMB', 'FIRE'], ['RMB', 'AIM DOWN SIGHTS'], ['R', 'RELOAD'], ['1 / 2 / WHEEL', 'SWAP WEAPON'], ['V', 'FIRE MODE — AUTO/BURST'], ['F', 'MELEE STOCK-STRIKE'], ['SHIFT', 'SPRINT'], ['SPACE', 'JUMP'], ['ESC', 'PAUSE'], ['5S CLEAR', 'VITALS RESTORE']] as [string, string][]).map(([k, v]) => (
+                      {([['W A S D', 'MOVE'], ['MOUSE', 'AIM — CURSOR LOCKS'], ['LMB', 'FIRE'], ['RMB', 'AIM DOWN SIGHTS'], ['R', 'RELOAD'], ['1-4 / WHEEL', 'SWAP WEAPON'], ['LMB MID-RELOAD', '12G SLAM-FIRE'], ['V', 'FIRE MODE — AUTO/BURST'], ['F', 'MELEE STOCK-STRIKE'], ['SHIFT', 'SPRINT'], ['SPACE', 'JUMP'], ['ESC', 'PAUSE'], ['5S CLEAR', 'VITALS RESTORE']] as [string, string][]).map(([k, v]) => (
                         <div key={k} className="flex items-baseline justify-between gap-3 border-b border-[rgba(127,183,201,0.12)] py-1.5">
                           <span className="font-display text-[11px] text-[#ffab3d]">{k}</span>
                           <span>{v}</span>
@@ -886,7 +896,7 @@ export default function App() {
   );
 }
 
-const WEAPON_MAGS = [8, 30];
+const WEAPON_MAGS = [8, 30, 5, 6];
 
 const ARMORY = [
   {
@@ -913,6 +923,32 @@ const ARMORY = [
       ['ROF', 92, false],
       ['MAG', 68, false],
       ['CTL', 44, false],
+    ] as [string, number, boolean][],
+  },
+  {
+    name: 'SABLE .38',
+    mode: 'DOUBLE-ACTION REVOLVER',
+    spec: ['.38 SPL', '0.75 KG', 'SNUB-NOSE', 'OPEN FRAME'],
+    desc: 'Five-shot pocket snub. Featherweight, so it kicks like a mule — but it never jams and every pull is its own event.',
+    recoil: 'RISING STAIRCASE, CYLINDER TWIST — QUICK SETTLE',
+    stats: [
+      ['DMG', 92, true],
+      ['ROF', 22, false],
+      ['MAG', 16, false],
+      ['CTL', 38, false],
+    ] as [string, number, boolean][],
+  },
+  {
+    name: 'RAVEN 12',
+    mode: 'SEMI-AUTO TACTICAL 12G',
+    spec: ['12 GAUGE', '3.2 KG', 'TUBE-FED', '8-PELLET'],
+    desc: 'Black-polymer auto-loader. Eight pellets per pull tear a wide cone up close, then peter out past ~20m. Shells load one at a time — but you can slam-fire mid-reload.',
+    recoil: 'DEEP TWO-STAGE SHOVE — WIDE LAZY ARC',
+    stats: [
+      ['DMG', 100, true],
+      ['ROF', 18, false],
+      ['MAG', 20, false],
+      ['CTL', 30, false],
     ] as [string, number, boolean][],
   },
 ];

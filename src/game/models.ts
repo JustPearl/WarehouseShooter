@@ -428,6 +428,112 @@ export function buildRevolver(): WeaponModel {
 }
 
 /* ============================================================
+   RAVEN 12 — semi-auto tube-fed tactical 12-gauge, black polymer.
+   Faces -Z. Bore axis y=+0.010; ghost-ring sight line y=+0.0575.
+   The whole group scales 1.15× for presence — engine anchors are
+   compensated (ads.y = -0.066, ads.z = -0.50). Muzzle anchor
+   z=-0.415 pre-scale.
+   ============================================================ */
+export function buildShotgun(): WeaponModel {
+  const g = new THREE.Group();
+
+  // ---- receiver: flat-sided black polymer auto-loader body ----
+  g.add(box(0.062, 0.052, 0.20, polymer, 0, 0.006, 0.02)); // z -0.08..+0.12
+  g.add(box(0.056, 0.010, 0.186, steelDark, 0, 0.034, 0.02)); // steel top cap / loading rail
+  for (let i = 0; i < 6; i++) g.add(box(0.040, 0.003, 0.006, polymer, 0, 0.0395, -0.052 + i * 0.021)); // rail teeth
+  // ejection port + bolt handle on the right side
+  g.add(box(0.004, 0.026, 0.060, steelDark, 0.032, 0.008, 0.018));
+  g.add(box(0.012, 0.012, 0.010, steelDark, 0.038, 0.008, 0.032)); // bolt handle knob
+  // red cross-bolt safety behind the trigger
+  const safety = new THREE.Mesh(new THREE.CylinderGeometry(0.0035, 0.0035, 0.064, 10), new THREE.MeshStandardMaterial({ color: 0xd0342c, roughness: 0.5 }));
+  safety.rotation.z = Math.PI / 2;
+  safety.position.set(0, -0.028, 0.036);
+  g.add(safety);
+  // shell lifter hint under the receiver
+  g.add(box(0.030, 0.006, 0.050, steelDark, 0, -0.022, -0.012));
+
+  // ---- barrel: 47cm steel tube with vent rib ----
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.0145, 0.0145, 0.34, 14), steel);
+  barrel.rotation.x = Math.PI / 2;
+  barrel.position.set(0, 0.010, -0.23); // z -0.40..-0.06
+  barrel.castShadow = true;
+  g.add(barrel);
+  const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.0152, 0.0152, 0.010, 14), steelDark);
+  crown.rotation.x = Math.PI / 2;
+  crown.position.set(0, 0.010, -0.398);
+  g.add(crown); // muzzle crown ring
+  // vent rib + ports along the top of the barrel
+  g.add(box(0.010, 0.005, 0.30, steelDark, 0, 0.0275, -0.22));
+  for (let i = 0; i < 5; i++) g.add(box(0.014, 0.004, 0.014, steelDark, 0, 0.0235, -0.13 - i * 0.055)); // rib posts
+  // barrel clamp tying barrel + tube at the muzzle end
+  g.add(box(0.036, 0.040, 0.018, polymer, 0, -0.004, -0.352));
+
+  // ---- tube magazine under the barrel, capped with a sling swivel ----
+  const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.0135, 0.0135, 0.30, 14), steelDark);
+  tube.rotation.x = Math.PI / 2;
+  tube.position.set(0, -0.018, -0.20); // z -0.35..-0.05
+  tube.castShadow = true;
+  g.add(tube);
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.0155, 0.0155, 0.014, 14), steel);
+  cap.rotation.x = Math.PI / 2;
+  cap.position.set(0, -0.018, -0.355);
+  g.add(cap); // mag cap
+  const swivel = new THREE.Mesh(new THREE.TorusGeometry(0.006, 0.0018, 6, 12), steel);
+  swivel.position.set(0, -0.036, -0.352);
+  g.add(swivel);
+
+  // ---- polymer forend wrapping the tube (short, tactical) ----
+  g.add(box(0.052, 0.052, 0.13, polymer, 0, -0.006, -0.14)); // z -0.205..-0.075
+  for (let i = 0; i < 4; i++) { // grip ribs on both sides
+    g.add(box(0.002, 0.040, 0.008, steelDark, 0.027, -0.006, -0.175 + i * 0.024));
+    g.add(box(0.002, 0.040, 0.008, steelDark, -0.027, -0.006, -0.175 + i * 0.024));
+  }
+  g.add(box(0.046, 0.008, 0.10, steelDark, 0, 0.022, -0.14)); // forend top rail
+
+  // ---- ghost-ring rear sight + front ramp with amber bead (line at y=+0.0575) ----
+  g.add(box(0.012, 0.026, 0.014, polymer, 0, 0.048, 0.098)); // rear riser
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.0075, 0.002, 8, 16), steel);
+  ring.position.set(0, 0.0575, 0.098);
+  g.add(ring);
+  const ramp = box(0.014, 0.030, 0.016, polymer, 0, 0.040, -0.368);
+  ramp.rotation.x = 0.30;
+  g.add(ramp);
+  g.add(box(0.005, 0.014, 0.008, steelDark, 0, 0.052, -0.362)); // post
+  g.add(box(0.004, 0.004, 0.004, sightGlow, 0, 0.0575, -0.366)); // amber bead on the line
+
+  // ---- trigger group: guard + amber blade ----
+  g.add(box(0.012, 0.044, 0.010, polymer, 0, -0.042, -0.006)); // guard front post
+  g.add(box(0.012, 0.010, 0.052, polymer, 0, -0.060, 0.022)); // guard bottom
+  const trg = box(0.007, 0.024, 0.010, amberPart, 0, -0.036, 0.014);
+  trg.rotation.x = 0.30;
+  g.add(trg);
+
+  // ---- raked pistol grip + skeleton polymer stock with recoil pad ----
+  const pg = box(0.036, 0.100, 0.046, polymer, 0, -0.082, 0.092);
+  pg.rotation.x = 0.26;
+  g.add(pg);
+  g.add(box(0.032, 0.010, 0.042, steelDark, 0, -0.048, 0.082)); // grip texture band
+  g.add(box(0.030, 0.034, 0.14, polymer, 0, 0.004, 0.20)); // stock arm z 0.13..0.27
+  g.add(box(0.026, 0.020, 0.10, steelDark, 0, -0.014, 0.19)); // comb recess
+  g.add(box(0.050, 0.092, 0.012, polymer, 0, -0.006, 0.276)); // buttpad frame
+  g.add(box(0.054, 0.096, 0.008, amberPart, 0, -0.006, 0.285)); // rubber recoil pad
+  // cheek riser + sling slot
+  g.add(box(0.020, 0.014, 0.06, polymer, 0, 0.026, 0.19));
+  g.add(box(0.010, 0.004, 0.040, steelDark, 0, -0.032, 0.22));
+
+  const muzzle = new THREE.Object3D();
+  muzzle.position.set(0, 0.010, -0.415);
+  muzzle.rotation.y = Math.PI; // gun is built facing -Z: make +Z point down the barrel
+  g.add(muzzle);
+  const flash = addFlash(muzzle, 0.40);
+
+  // presence pass: the long gun dominates the frame; anchors are compensated in the config
+  g.scale.setScalar(1.15);
+
+  return { group: g, muzzle, flash };
+}
+
+/* ============================================================
    MERCENARY — articulated winter operator, faces +Z
    Skeleton: group -> pelvis -> spine -> head
                       |          \-> shoulders -> elbows
