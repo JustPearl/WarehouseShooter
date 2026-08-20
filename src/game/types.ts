@@ -32,6 +32,7 @@ export interface HudState {
   atts: string[]; // equipped attachment ids on the active weapon
   streak: number; // current kill chain (0 = none)
   streakT: number; // 1..0 — time left in the chain window
+  perkChoices: string[] | null; // 3 perk ids on offer between waves; null = not choosing
 }
 
 /** kill-chain callouts: exact counts that trigger a banner + stinger */
@@ -294,7 +295,24 @@ export interface WeaponRt {
   meleeT: number; // melee cooldown timer
 }
 
-export type EnemyRole = 'rifle' | 'breacher' | 'marksman';
+export type EnemyRole = 'rifle' | 'breacher' | 'marksman' | 'warlord';
+
+/** Between-wave upgrades. The director deals three; the player keeps one. */
+export interface PerkDef {
+  id: string;
+  name: string;
+  desc: string;
+}
+export const PERKS: PerkDef[] = [
+  { id: 'heavy',    name: 'HEAVY ROUNDS',   desc: '+12% projectile damage' },
+  { id: 'rapid',    name: 'RAPID CYCLE',    desc: '+10% fire rate on everything' },
+  { id: 'drill',    name: 'DRILL SERGEANT', desc: '−15% reload time' },
+  { id: 'boots',    name: 'LIGHT BOOTS',    desc: '+8% movement speed' },
+  { id: 'plate',    name: 'THICK PLATE',    desc: '+25 max vitals, patched up now' },
+  { id: 'wind',     name: 'SECOND WIND',    desc: '+40% vitals restore rate' },
+  { id: 'steady',   name: 'STEADY HANDS',   desc: '+12% faster sight picture' },
+  { id: 'quarter',  name: 'QUARTERMASTER',  desc: '+60% ammo reserves, delivered now' },
+];
 
 export interface RagJoint {
   o: THREE.Object3D;

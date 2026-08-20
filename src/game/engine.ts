@@ -9,7 +9,7 @@ import { buildLights, buildWorld, PathGrid } from './world';
 import type { Lamp } from './world';
 import {
   EYE, HALF_W, HALF_D, YARD_W, YARD_D, GRAV,
-  NEUTRAL, ATT_MODS, ATT_MAGADD, WEAPON_CFGS, STREAK_TIERS,
+  NEUTRAL, ATT_MODS, ATT_MAGADD, WEAPON_CFGS, STREAK_TIERS, PERKS,
 } from './types';
 import type {
   GamePhase, Hooks, WeaponMods, WeaponRt, Enemy, RagJoint,
@@ -114,6 +114,14 @@ export class Engine {
   private maxAlive = 4;
   private waveState: 'inter' | 'combat' = 'inter';
   private interT = 2.2;
+  private warlordQueue = 0; // elite spawns still owed this wave
+  // --- between-wave perk draft ---
+  private choosingPerk = false;
+  private perkChoices: string[] = [];
+  private perksTaken: string[] = [];
+  private perkMult = { dmg: 1, fire: 1, reload: 1, move: 1, maxhp: 100, regen: 1, ads: 1 };
+  // --- escalating storm: worsens each wave so later fights feel heavier ---
+  private stormK = 0;
   private score = 0;
   private kills = 0;
   private headshots = 0;
@@ -466,7 +474,7 @@ export class Engine {
     this.spawnQueue = 0;
   }
 
-  private spawnEnemy() {
+  private spawnEnemy(forceRole?: Enemy['role']) {
     const anchors: [number, number][] = [
       [-43, -33], [-20, -33], [0, -33], [20, -33], [43, -33],
       [-43, 0], [43, 0],
@@ -484,15 +492,20 @@ export class Engine {
     model.group.position.set(best[0] + (Math.random() - 0.5) * 3, -1.5, best[1] + (Math.random() - 0.5) * 3);
     this.scene.add(model.group);
 
-    // ---- combat archetype: rifle (default), breacher (shotgun rusher), marksman (long-range) ----
+    // ---- combat archetype: rifle, breacher, marksman, and the elite warlord ----
     const rollR = Math.random();
     const breacherW = Math.min(0.34, 0.14 + this.wave * 0.02);
     const marksmanW = Math.min(0.26, 0.1 + this.wave * 0.018);
-    const role: Enemy['role'] = rollR < breacherW ? 'breacher' : rollR < breacherW + marksmanW ? 'marksman' : 'rifle';
+    const role: Enemy['role'] =
+      forceRole ?? (rollR < breacherW ? 'breacher' : rollR < breacherW + marksmanW ? 'marksman' : 'rifle');
+
+    // warlord: a visibly bigger operator with a burning ember beacon
+    if (role === 'warlord') model.group.scale.multiplyScalar(1.14);
+
     // role beacon lamp on the left shoulder so you can read the threat at a glance
-    const lampCol = role === 'breacher' ? 0xff8b2a : role === 'marksman' ? 0x55d7ff : 0x3a4750;
+    const lampCol = role === 'warlord' ? 0xff5c33 : role === 'breacher' ? 0xff8b2a : role === 'marksman' ? 0x55d7ff : 0x3a4750;
     const lamp = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.045, 0.045, 0.05, 8),
+      new THREE.CylinderGeometry(role === 'warlord' ? 0.06 : 0.045, role === 'warlord' ? 0.06 : 0.045, 0.05, 8),
       new THREE.MeshStandardMaterial({ color: 0x111417, emissive: lampCol, emissiveIntensity: role === 'rifle' ? 0.5 : 2.2, roughness: 0.4 }),
     );
     lamp.rotation.z = Math.PI / 2;
@@ -522,12 +535,12 @@ export class Engine {
     const baseSpeed = Math.min(4.0, 2.3 + (this.wave - 1) * 0.15) * (2 - model.bulk);
     const e: Enemy = {
       id, model,
-      hp: Math.round((45 + (this.wave - 1) * 10) * model.bulk * (role === 'breacher' ? 1.35 : role === 'marksman' ? 0.85 : 1)),
+      hp: Math.round((45 + (this.wave - 1) * 10) * model.bulk * (role === 'warlord' ? 2.6 : role === 'breacher' ? 1.35 : role === 'marksman' ? 0.85 : 1)),
       state: 'rise', t: 0, strafeDir: Math.random() > 0.5 ? 1 : -1,
       strafeT: 1 + Math.random(), burst: 0, burstT: 0,
-      shotT: role === 'marksman' ? 1.6 + Math.random() : 1.2 + Math.random() * 1.2,
-      speed: baseSpeed * (role === 'breacher' ? 1.45 : role === 'marksman' ? 0.72 : 1),
-      prefDist: role === 'breacher' ? 3.5 + Math.random() * 2 : role === 'marksman' ? 19 + Math.random() * 7 : 10 + Math.random() * 6,
+      shotT: role === 'warlord' ? 0.9 + Math.random() : role === 'marksman' ? 1.6 + Math.random() : 1.2 + Math.random() * 1.2,
+      speed: baseSpeed * (role === 'warlord' ? 0.82 : role === 'breacher' ? 1.45 : role === 'marksman' ? 0.72 : 1),
+      prefDist: role === 'warlord' ? 7 + Math.random() * 3 : role === 'breacher' ? 3.5 + Math.random() * 2 : role === 'marksman' ? 19 + Math.random() * 7 : 10 + Math.random() * 6,
       walkPhase: Math.random() * 6,
       flashT: 0, flashMats, fallDir: (Math.random() - 0.5) * 0.6,
       skin, seed: Math.random() * 100, fireKick: 0, hurtT: 0, hurtX: 0, hurtZ: 0,
@@ -663,7 +676,7 @@ export class Engine {
     if (w.reloadT >= 0 || w.mag >= w.cfg.magSize + w.mod.magAdd || w.reserve <= 0) return;
     w.reloadT = 0;
     if (w.cfg.tubeFed) sfx.reloadGate();
-    else sfx.reload(w.cfg.reloadTime * w.mod.reload);
+    else sfx.reload(w.cfg.reloadTime * w.mod.reload * this.perkMult.reload);
     this.hudDirty = true;
   }
 
@@ -723,7 +736,7 @@ export class Engine {
       return;
     }
     w.mag--;
-    w.cooldown = w.cfg.fireDelay * w.mod.fire;
+    w.cooldown = w.cfg.fireDelay * w.mod.fire * this.perkMult.fire;
     w.heat = Math.min(1, w.heat + (w.cfg.auto ? 0.11 : 0.2));
     this.shotsFired++;
 
@@ -833,7 +846,7 @@ export class Engine {
         if (enemy) {
           this.shotsHit++;
           const head = ud.part === 'head';
-          let dmg = w.cfg.dmg * w.mod.dmg * (head ? w.cfg.headMul : 1);
+          let dmg = w.cfg.dmg * w.mod.dmg * this.perkMult.dmg * (head ? w.cfg.headMul : 1);
           // shotgun pellets lose their punch with distance
           if (w.cfg.falloffStart !== undefined && w.cfg.falloffEnd !== undefined) {
             const fs = w.cfg.falloffStart, fe = w.cfg.falloffEnd, fm = w.cfg.falloffMin ?? 0.3;
@@ -986,7 +999,10 @@ export class Engine {
 
   private tick(dt: number, t: number) {
     if (this.phase === 'playing') {
-      if (this.freezeT > 0) {
+      if (this.choosingPerk) {
+        // the draft freezes the fight: the storm keeps falling, nothing else moves
+        this.updateAmbient(dt, t);
+      } else if (this.freezeT > 0) {
         // hitstop: the world holds its breath for a beat around each kill
         this.freezeT -= dt;
         this.shake *= Math.exp(-6 * dt);
@@ -1017,8 +1033,8 @@ export class Engine {
 
   private updatePlayer(dt: number, t: number) {
     // out-of-combat regen: 5s after the last hit, vitals restore at 26/s
-    if (this.health > 0 && this.health < 100 && this.simT - this.lastDamageT > 5) {
-      this.health = Math.min(100, this.health + 26 * dt);
+    if (this.health > 0 && this.health < this.perkMult.maxhp && this.simT - this.lastDamageT > 5) {
+      this.health = Math.min(this.perkMult.maxhp, this.health + 26 * this.perkMult.regen * dt);
       this.hudDirty = true;
     }
 
@@ -1034,7 +1050,7 @@ export class Engine {
 
     const sprint = !!(this.keys['ShiftLeft'] || this.keys['ShiftRight']);
     const wantAds = this.ads && this.curWeapon().reloadT < 0;
-    const speedBase = (sprint && !wantAds ? 6.3 : 4.3) * (wantAds ? 0.55 : 1);
+    const speedBase = (sprint && !wantAds ? 6.3 : 4.3) * (wantAds ? 0.55 : 1) * this.perkMult.move;
 
     const fwd = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
@@ -1499,6 +1515,10 @@ export class Engine {
         this.wave++;
         this.spawnQueue = Math.min(3 + this.wave * 2, 24);
         this.maxAlive = Math.min(3 + this.wave, 8);
+        // the director owes you elites from wave 3 on — one more every third wave
+        this.warlordQueue = this.wave >= 3 ? Math.min(1 + Math.floor((this.wave - 3) / 3), 3) : 0;
+        // the storm deepens: later waves are darker, denser, harder to see through
+        this.stormK = Math.min(1, (this.wave - 1) / 14);
         this.spawnT = 0.3;
         this.waveState = 'combat';
         sfx.waveHorn();
@@ -1511,22 +1531,64 @@ export class Engine {
     if (this.spawnQueue > 0) {
       this.spawnT -= dt;
       if (this.spawnT <= 0 && alive < this.maxAlive) {
-        this.spawnEnemy();
+        // elites arrive first so the whole wave plays around them
+        const force = this.warlordQueue > 0 ? 'warlord' : undefined;
+        if (force) this.warlordQueue--;
+        this.spawnEnemy(force);
         this.spawnQueue--;
         this.spawnT = Math.max(0.55, 1.5 - this.wave * 0.06);
       }
-    } else if (alive === 0) {
+    } else if (alive === 0 && !this.choosingPerk) {
       const bonus = 200 + this.wave * 100;
       this.score += bonus;
-      this.health = Math.min(100, this.health + 30);
-      this.weapons[0].reserve += 24;
-      this.weapons[1].reserve += 90;
-      this.waveState = 'inter';
-      this.interT = 4;
+      this.health = Math.min(this.perkMult.maxhp, this.health + 30);
       sfx.waveClear();
       this.hooks.event({ type: 'waveclear', n: this.wave, bonus });
+      // hand the player a choice — this is the beat that makes the next wave worth fighting for
+      this.openPerkDraft();
       this.hudDirty = true;
     }
+  }
+
+  /* ---------- between-wave perk draft ---------- */
+  private openPerkDraft() {
+    this.choosingPerk = true;
+    const pool = PERKS.map((p) => p.id).filter((id) => !this.perksTaken.includes(id) || id === 'quarter');
+    const picks: string[] = [];
+    const copy = [...pool];
+    while (picks.length < 3 && copy.length) {
+      picks.push(copy.splice(Math.floor(Math.random() * copy.length), 1)[0]);
+    }
+    this.perkChoices = picks;
+    this.hudDirty = true;
+  }
+
+  /** Player picks one of the offered perks; applies immediately and resumes the intermission. */
+  choosePerk(id: string) {
+    if (!this.choosingPerk) return;
+    this.choosingPerk = false;
+    this.perkChoices = [];
+    this.perksTaken.push(id);
+    const m = this.perkMult;
+    switch (id) {
+      case 'heavy':   m.dmg *= 1.12; break;
+      case 'rapid':   m.fire *= 0.91; break;
+      case 'drill':   m.reload *= 0.85; break;
+      case 'boots':   m.move *= 1.08; break;
+      case 'plate':   m.maxhp += 25; this.health = Math.min(m.maxhp, this.health + 25); break;
+      case 'wind':    m.regen *= 1.4; break;
+      case 'steady':  m.ads *= 1.12; break;
+      case 'quarter': this.weapons.forEach((w) => { w.reserve = Math.round(w.reserve * 1.6) + 30; }); break;
+    }
+    // the usual intermission resupply lands with the perk
+    this.weapons[0].reserve += 24;
+    this.weapons[1].reserve += 90;
+    const def = PERKS.find((p) => p.id === id);
+    if (def) this.hooks.event({ type: 'pickup', text: `${def.name} — ${def.desc.toUpperCase()}` });
+    sfx.pickup();
+    this.waveState = 'inter';
+    this.interT = 3.2;
+    this.hudDirty = true;
   }
 
   private updatePickups(dt: number) {
