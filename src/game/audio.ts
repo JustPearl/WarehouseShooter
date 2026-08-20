@@ -133,6 +133,13 @@ class Sfx {
     this.tone('square', 500, 300, 0.02, 0.14, 0.05);
   }
 
+  /** warlord arrival: a low brass growl under the wind */
+  warlord() {
+    this.tone('sawtooth', 92, 44, 0.8, 0.42);
+    this.tone('sawtooth', 138, 66, 0.8, 0.3, 0.06);
+    this.noise(0.6, 0.22, 'lowpass', 420, 110, 0.95);
+  }
+
   /** opening the loading gate / racking the bolt to start a tube reload */
   reloadGate() {
     this.noise(0.07, 0.3, 'bandpass', 1400, 700, 0.7);

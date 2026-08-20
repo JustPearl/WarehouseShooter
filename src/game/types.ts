@@ -18,6 +18,7 @@ export interface WeaponHud {
 export interface HudState {
   phase: GamePhase;
   health: number;
+  maxhp: number; // raised by the THICK PLATE perk
   weaponIndex: number;
   weapons: WeaponHud[];
   wave: number;
@@ -62,6 +63,7 @@ export type GameEvent =
   | { type: 'kill'; weapon: string; head: boolean }
   | { type: 'pickup'; text: string }
   | { type: 'streak'; n: number; label: string }
+  | { type: 'alert'; title: string; sub: string }
   | { type: 'scorepop'; text: string; x: number; y: number; head: boolean }
   | { type: 'gameover'; stats: EndStats };
 

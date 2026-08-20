@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Engine } from './game/engine';
 import type { EndStats, GameEvent, HudState } from './game/types';
+import { PERKS } from './game/types';
 import { sfx } from './game/audio';
 
 const DEFAULT_HUD: HudState = {
   phase: 'menu',
   health: 100,
+  maxhp: 100,
   weaponIndex: 0,
   weapons: [
     { name: 'KODIAK .45', short: 'KDK .45', mag: 8, reserve: 56, auto: false, mode: 'SEMI', atts: [] },
@@ -25,6 +27,7 @@ const DEFAULT_HUD: HudState = {
   atts: [],
   streak: 0,
   streakT: 0,
+  perkChoices: null,
 };
 
 interface FeedItem { id: number; weapon: string; head: boolean; n: number }
@@ -179,6 +182,52 @@ function LoadoutPanel({
     </div>
   );
 }
+/* ---------- between-wave perk draft: the choice that makes the next wave matter ---------- */
+function PerkPicker({ choices, onPick }: { choices: string[]; onPick: (id: string) => void }) {
+  return (
+    <div className="absolute inset-0 z-40 flex items-center justify-center bg-[rgba(3,8,12,0.6)]">
+      <div className="fx-rise w-[min(94vw,56rem)]">
+        <div className="text-center">
+          <div className="text-[10px] font-bold tracking-[0.5em] text-[#7fb7c9]">SUPPLY DROP — WAVE CLEARED</div>
+          <h2 className="font-display mt-1 text-4xl text-[#bfeaf5]">
+            CHOOSE <span className="text-[#ffab3d]">YOUR EDGE</span>
+          </h2>
+          <div className="mx-auto mt-2 h-[3px] w-16 bg-[#ffab3d]" />
+          <p className="mt-2 text-[11px] font-semibold tracking-[0.24em] text-[#7fb7c9]">
+            PRESS <span className="text-[#ffab3d]">1 · 2 · 3</span> — ONE PERK, NO REFUNDS
+          </p>
+        </div>
+        <div className="mt-7 grid grid-cols-1 gap-3 md:grid-cols-3">
+          {choices.map((id, i) => {
+            const def = PERKS.find((p) => p.id === id);
+            if (!def) return null;
+            return (
+              <button
+                key={id}
+                onClick={() => onPick(id)}
+                className="hud-plate group relative px-5 py-6 text-left transition-all duration-150 hover:-translate-y-1 hover:shadow-[0_0_30px_rgba(255,171,61,0.22)]"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-display text-[11px] tracking-[0.3em] text-[#54707e]">0{i + 1}</span>
+                  <span className="border border-[rgba(255,171,61,0.45)] bg-[rgba(255,171,61,0.10)] px-2 py-[2px] font-display text-[12px] leading-none text-[#ffab3d] shadow-[0_0_10px_rgba(255,171,61,0.25)]">
+                    {i + 1}
+                  </span>
+                </div>
+                <div className="font-display mt-2 text-xl leading-tight text-[#bfeaf5] transition-colors duration-150 group-hover:text-[#ffab3d]">
+                  {def.name}
+                </div>
+                <div className="mt-2 h-px w-full bg-[rgba(127,183,201,0.18)]" />
+                <p className="mt-2 text-[12px] font-semibold tracking-[0.08em] text-[#9cc3d2]">{def.desc}</p>
+                <span className="absolute left-0 top-0 h-[3px] w-0 bg-[#ffab3d] transition-all duration-200 group-hover:w-full" />
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function fmtTime(s: number) {
   const m = Math.floor(s / 60);
   const ss = Math.floor(s % 60);
@@ -363,6 +412,9 @@ export default function App() {
       case 'streak':
         setBanner({ id: Date.now(), title: e.label, sub: `×${e.n} SCORE CHAIN`, tone: 'good' });
         break;
+      case 'alert':
+        setBanner({ id: Date.now(), title: e.title, sub: e.sub, tone: 'warn' });
+        break;
       case 'scorepop': {
         const id = ++popSeq.current;
         setPops((ps) => [...ps.slice(-7), { id, text: e.text, x: e.x, y: e.y, head: e.head }]);
@@ -395,7 +447,7 @@ export default function App() {
 
   const w = hud.weapons[hud.weaponIndex];
   const playing = hud.phase === 'playing' || hud.phase === 'paused';
-  const healthPct = hud.health / 100;
+  const healthPct = hud.health / hud.maxhp;
   const healthColor = hud.regen ? '#63e6b0' : healthPct > 0.5 ? '#bfeaf5' : healthPct > 0.25 ? '#ffab3d' : '#ff3b30';
 
   return (
@@ -409,6 +461,18 @@ export default function App() {
       {/* ======================= IN-GAME HUD ======================= */}
       {playing && (
         <div className="pointer-events-none absolute inset-0">
+          {/* between-wave perk draft — the fight freezes until you choose */}
+          {hud.perkChoices && (
+            <div className="pointer-events-auto">
+              <PerkPicker
+                choices={hud.perkChoices}
+                onPick={(id) => {
+                  sfx.ui();
+                  engineRef.current?.choosePerk(id);
+                }}
+              />
+            </div>
+          )}
           {/* base vignette */}
           <div className="fx-vignette absolute inset-0" />
           {hud.health <= 25 && <div className="fx-lowhp absolute inset-0" />}

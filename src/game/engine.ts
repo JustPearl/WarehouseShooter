@@ -269,6 +269,13 @@ export class Engine {
     this.keys[e.code] = true;
     if (this.phase !== 'playing') return;
     if (e.code === 'KeyR') this.startReload();
+    // the draft is decided with 1/2/3 — the trigger stays cold while you choose
+    if (this.choosingPerk) {
+      if (e.code === 'Digit1' && this.perkChoices[0]) this.choosePerk(this.perkChoices[0]);
+      else if (e.code === 'Digit2' && this.perkChoices[1]) this.choosePerk(this.perkChoices[1]);
+      else if (e.code === 'Digit3' && this.perkChoices[2]) this.choosePerk(this.perkChoices[2]);
+      return;
+    }
     if (e.code === 'Digit1') this.switchTo(0);
     if (e.code === 'Digit2') this.switchTo(1);
     if (e.code === 'Digit3') this.switchTo(2);
@@ -367,6 +374,12 @@ export class Engine {
     this.headshots = 0;
     this.freezeT = 0;
     this.streak = 0;
+    this.warlordQueue = 0;
+    this.choosingPerk = false;
+    this.perkChoices = [];
+    this.perksTaken = [];
+    this.perkMult = { dmg: 1, fire: 1, reload: 1, move: 1, maxhp: 100, regen: 1, ads: 1 };
+    this.stormK = 0;
     this.lastKillT = -99;
     this.hbAcc = 0;
     this.nmT = 0;
@@ -594,8 +607,14 @@ export class Engine {
     this.streak = this.simT - this.lastKillT < 3.5 ? this.streak + 1 : 1;
     this.lastKillT = this.simT;
     const mul = Math.min(2.5, 1 + 0.15 * (this.streak - 1));
-    const gained = Math.round((100 + this.wave * 10 + (head ? 75 : 0)) * mul);
+    const elite = e.role === 'warlord' ? 3 : 1;
+    const gained = Math.round((100 + this.wave * 10 + (head ? 75 : 0)) * mul * elite);
     this.score += gained;
+    if (e.role === 'warlord') {
+      this.freezeT = Math.max(this.freezeT, 0.12);
+      this.dropPickup(e.model.group.position.clone(), 'ammo');
+      this.hooks.event({ type: 'alert', title: 'WARLORD DOWN', sub: `+${gained} — AMMO CACHE DROPPED` });
+    }
     const tier = STREAK_TIERS.find((t) => this.streak === t.n);
     if (tier) {
       this.hooks.event({ type: 'streak', n: this.streak, label: tier.label });
@@ -693,6 +712,7 @@ export class Engine {
   /** Quick stock-strike: staggers and damages anything in a short cone ahead. */
   private melee() {
     const w = this.curWeapon();
+    if (this.choosingPerk) return;
     if (w.meleeT > 0 || w.reloadT >= 0) return;
     w.meleeT = 0.55;
     w.meleeK = 1;
@@ -723,6 +743,7 @@ export class Engine {
 
   private tryFire() {
     const w = this.curWeapon();
+    if (this.choosingPerk) return; // the draft freezes the trigger
     if (w.cooldown > 0) return;
     if (w.reloadT >= 0) {
       // a tube-fed gun can slam-fire whatever's already chambered, cutting the reload short
@@ -938,6 +959,11 @@ export class Engine {
       sfx.enemyMarksman(dist);
       e.fireKick = 1.1;
       this.enemyShot(muzzlePos, base, dist, 0.012, () => Math.round(10 + Math.random() * 6 + Math.min(12, this.wave)));
+    } else if (e.role === 'warlord') {
+      // the warlord's rifle is tuned: tighter bursts, heavier hits
+      sfx.enemyShoot(dist);
+      e.fireKick = 1.4;
+      this.enemyShot(muzzlePos, base, dist, 0.55, () => Math.round(7 + Math.random() * 5 + Math.min(12, this.wave)));
     } else {
       sfx.enemyShoot(dist);
       e.fireKick = 1;
@@ -1156,7 +1182,7 @@ export class Engine {
     const inert = wantAds ? 0.16 : 1; // braced in the shoulder: the gun tracks the eye almost rigidly
     const m = w.cfg.recoil; // stock/grip/action shape how the gun moves in the hands
     const anchor = wantAds ? w.cfg.ads : w.cfg.hip;
-    const lerpF = Math.min(1, dt * (wantAds ? 26 * w.mod.adsSpeed : 13));
+    const lerpF = Math.min(1, dt * (wantAds ? 26 * w.mod.adsSpeed * this.perkMult.ads : 13));
     const g = w.model.group;
 
     // simple reload animation: dip + roll toward the off-hand, sine envelope (no mag mesh animation)
@@ -1203,7 +1229,7 @@ export class Engine {
     if (w.reloadT >= 0) {
       w.reloadT += dt;
       this.hudDirty = true;
-      if (w.reloadT >= w.cfg.reloadTime * w.mod.reload) {
+      if (w.reloadT >= w.cfg.reloadTime * w.mod.reload * this.perkMult.reload) {
         if (w.cfg.tubeFed) {
           // one shell per cycle — keep topping the tube until it's full or the belt's dry
           w.mag += 1;
@@ -1533,7 +1559,11 @@ export class Engine {
       if (this.spawnT <= 0 && alive < this.maxAlive) {
         // elites arrive first so the whole wave plays around them
         const force = this.warlordQueue > 0 ? 'warlord' : undefined;
-        if (force) this.warlordQueue--;
+        if (force) {
+          this.warlordQueue--;
+          sfx.warlord();
+          this.hooks.event({ type: 'alert', title: 'WARLORD', sub: 'ELITE HOSTILE INBOUND — DROP IT FIRST' });
+        }
         this.spawnEnemy(force);
         this.spawnQueue--;
         this.spawnT = Math.max(0.55, 1.5 - this.wave * 0.06);
@@ -1606,7 +1636,7 @@ export class Engine {
           this.weapons[1].reserve += 60;
           this.hooks.event({ type: 'pickup', text: 'AMMO CACHE +16 / +60' });
         } else {
-          this.health = Math.min(100, this.health + 25);
+          this.health = Math.min(this.perkMult.maxhp, this.health + 25);
           this.hooks.event({ type: 'pickup', text: 'MEDKIT +25 HP' });
         }
         sfx.pickup();
@@ -1623,12 +1653,17 @@ export class Engine {
   }
 
   private updateAmbient(dt: number, t: number) {
-    // snow — fixed to the yard, wraps at the fence line
+    // the world itself closes in as the storm deepens wave over wave
+    (this.scene.fog as THREE.FogExp2).density = 0.017 + this.stormK * 0.007;
+
+    // snow — fixed to the yard, wraps at the fence line; falls faster and drifts harder in the storm
+    const stormFall = 1 + this.stormK * 0.55;
+    const stormDrift = 1 + this.stormK * 1.1;
     const attr = this.snow.geometry.getAttribute('position') as THREE.BufferAttribute;
     const arr = attr.array as Float32Array;
     for (let i = 0; i < this.snowVel.length; i++) {
-      arr[i * 3 + 1] -= this.snowVel[i] * dt;
-      arr[i * 3] += (1.1 + Math.sin(t * 0.6 + i) * 0.5) * dt;
+      arr[i * 3 + 1] -= this.snowVel[i] * stormFall * dt;
+      arr[i * 3] += (1.1 + Math.sin(t * 0.6 + i) * 0.5) * stormDrift * dt;
       if (arr[i * 3 + 1] < 0) {
         arr[i * 3 + 1] = 15 + Math.random() * 3;
         arr[i * 3] = (Math.random() - 0.5) * YARD_W * 2;
@@ -1686,14 +1721,16 @@ export class Engine {
       enemiesLeft: this.spawnQueue + alive,
       score: this.score,
       kills: this.kills,
-      reload: w.reloadT >= 0 ? w.reloadT / (w.cfg.reloadTime * w.mod.reload) : -1,
+      reload: w.reloadT >= 0 ? w.reloadT / (w.cfg.reloadTime * w.mod.reload * this.perkMult.reload) : -1,
       gap: this.ads ? 3 : Math.round(6 + jit * 260),
       ads: this.ads,
       atts: Object.keys(w.attNodes).filter((a) => w.attNodes[a].visible),
       sprint: !!(this.keys['ShiftLeft'] || this.keys['ShiftRight']),
-      regen: this.health < 100 && this.health > 0 && this.simT - this.lastDamageT > 5,
+      regen: this.health < this.perkMult.maxhp && this.health > 0 && this.simT - this.lastDamageT > 5,
       streak: this.streak,
       streakT: this.streak > 0 ? Math.max(0, 1 - (this.simT - this.lastKillT) / 3.5) : 0,
+      maxhp: this.perkMult.maxhp,
+      perkChoices: this.choosingPerk ? [...this.perkChoices] : null,
     });
   }
 }
