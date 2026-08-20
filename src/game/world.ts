@@ -3,7 +3,7 @@ import {
   floorTexture, wallTexture, crateTexture, concreteTexture,
   snowGroundTexture, chainLinkTexture, roofTexture,
 } from './textures';
-import { HALF_W, HALF_D, YARD_W, YARD_D, WORLD_N, RAIL_X } from './types';
+import { HALF_W, HALF_D, YARD_W, YARD_D, WORLD_N } from './types';
 
 export interface Lamp { light: THREE.Light; base: number; seed: number; }
 
@@ -24,10 +24,11 @@ export function buildLights(scene: THREE.Scene) {
   moon.position.set(30, 44, -26);
   moon.castShadow = true;
   moon.shadow.mapSize.set(2048, 2048);
-    moon.shadow.camera.left = -60;
-    moon.shadow.camera.right = 60;
-    moon.shadow.camera.top = 54;
-    moon.shadow.camera.bottom = -74; // reaches the far end of the rail spur  moon.shadow.camera.near = 6;
+  moon.shadow.camera.left = -58;
+  moon.shadow.camera.right = 58;
+  moon.shadow.camera.top = 50;
+  moon.shadow.camera.bottom = -50;
+  moon.shadow.camera.near = 6;
   moon.shadow.camera.far = 130;
   moon.shadow.bias = -0.00035;
   moon.shadow.normalBias = 0.035;
@@ -119,26 +120,18 @@ export function buildWorld(scene: THREE.Scene): WorldRefs {
     scene.add(grp);
   };
   // south + full east/west runs (sides now reach the new northern boundary)
+  // symmetric perimeter — the freight yard sits inside the south strip
+  fenceSide(YARD_W * 2, 0, -YARD_D, 0);
   fenceSide(YARD_W * 2, 0, YARD_D, 0);
-  fenceSide(YARD_D + WORLD_N, -YARD_W, (YARD_D - WORLD_N) / 2, Math.PI / 2);
-  fenceSide(YARD_D + WORLD_N, YARD_W, (YARD_D - WORLD_N) / 2, Math.PI / 2);
-  // the old north fence is breached around the rail gate — the spur pours in
-  const gateHalf = 7.5; // passable gap centered on the rail line
-  fenceSide(YARD_W + RAIL_X - gateHalf, (-YARD_W + RAIL_X - gateHalf) / 2, -YARD_D, 0);
-  fenceSide(YARD_W - RAIL_X - gateHalf, (YARD_W + RAIL_X + gateHalf) / 2, -YARD_D, 0);
-  // new northern boundary, solid but for a flanking gap out east
-  fenceSide(YARD_W * 2 - 10, -5, -WORLD_N, 0);
-  fenceSide(8, YARD_W - 4, -WORLD_N, 0);
+  fenceSide(YARD_D * 2, -YARD_W, 0, Math.PI / 2);
+  fenceSide(YARD_D * 2, YARD_W, 0, Math.PI / 2);
   // fence blocks movement but not bullets — colliders only, no hit meshes
-  const fenceBox = (x0: number, z0: number, x1: number, z1: number) =>
-    colliderBoxes.push(new THREE.Box3(new THREE.Vector3(x0, 0, z0), new THREE.Vector3(x1, fenceH, z1)));
-  fenceBox(-YARD_W, YARD_D - 0.15, YARD_W, YARD_D + 0.15); // south
-  fenceBox(-YARD_W - 0.15, -WORLD_N, -YARD_W + 0.15, YARD_D); // west
-  fenceBox(YARD_W - 0.15, -WORLD_N, YARD_W + 0.15, YARD_D); // east
-  fenceBox(-YARD_W, -YARD_D - 0.15, RAIL_X - gateHalf, -YARD_D + 0.15); // north-left of rail gate
-  fenceBox(RAIL_X + gateHalf, -YARD_D - 0.15, YARD_W, -YARD_D + 0.15); // north-right of rail gate
-  fenceBox(-YARD_W, -WORLD_N - 0.15, YARD_W - 10, -WORLD_N + 0.15); // far north
-  fenceBox(YARD_W - 2, -WORLD_N - 0.15, YARD_W, -WORLD_N + 0.15); // far-north stub east of the gap
+  colliderBoxes.push(
+    new THREE.Box3(new THREE.Vector3(-YARD_W, 0, -YARD_D - 0.15), new THREE.Vector3(YARD_W, fenceH, -YARD_D + 0.15)),
+    new THREE.Box3(new THREE.Vector3(-YARD_W, 0, YARD_D - 0.15), new THREE.Vector3(YARD_W, fenceH, YARD_D + 0.15)),
+    new THREE.Box3(new THREE.Vector3(-YARD_W - 0.15, 0, -YARD_D), new THREE.Vector3(-YARD_W + 0.15, fenceH, YARD_D)),
+    new THREE.Box3(new THREE.Vector3(YARD_W - 0.15, 0, -YARD_D), new THREE.Vector3(YARD_W + 0.15, fenceH, YARD_D)),
+  );
   // wind-piled drifts against the fence line
   const driftSpots: [number, number][] = [];
   for (let i = 0; i < 8; i++) driftSpots.push([-YARD_W + 2 + Math.random() * (YARD_W * 2 - 4), -YARD_D + 1.1 + Math.random() * 1.5]);
@@ -158,152 +151,252 @@ export function buildWorld(scene: THREE.Scene): WorldRefs {
     m.position.set(x, y, z);
     addSolid(m, 'wall');
   };
-  // ---- the rail spur: derailed freight line running north through the new area ----
-  const steelRail = new THREE.MeshStandardMaterial({ color: 0x4a4136, roughness: 0.5, metalness: 0.75 });
-  const tieMat = new THREE.MeshStandardMaterial({ color: 0x2b2118, roughness: 0.95 });
-  // sleepers every 1.4m from the gate to the buried end
-  for (let z = -38; z > -57; z -= 1.4) {
-    const tie = new THREE.Mesh(new THREE.BoxGeometry(2.7, 0.14, 0.3), tieMat);
-    tie.position.set(RAIL_X, 0.04, z + Math.sin(z * 2.1) * 0.12);
-    tie.rotation.y = Math.sin(z * 1.7) * 0.05;
-    tie.receiveShadow = true;
-    scene.add(tie);
-  }
-  for (const off of [-1.05, 1.05]) {
-    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.14, 19), steelRail);
-    rail.position.set(RAIL_X + off, 0.13, -47.5);
-    rail.castShadow = true;
-    scene.add(rail);
-  }
-
-  // derailed boxcar — the big anchor of the spur, half-buried and leaning
-  const carMat = new THREE.MeshStandardMaterial({ color: 0x4d3226, roughness: 0.85, metalness: 0.15 });
-  const carTrim = new THREE.MeshStandardMaterial({ color: 0x3a2a20, roughness: 0.8, metalness: 0.3 });
-  const car = new THREE.Group();
-  const carBody = new THREE.Mesh(new THREE.BoxGeometry(3.05, 2.8, 9.4), carMat);
-  carBody.position.y = 1.9;
-  carBody.castShadow = true;
-  carBody.receiveShadow = true;
-  car.add(carBody);
-  for (const sx of [-1, 1]) {
-    const rib = new THREE.Mesh(new THREE.BoxGeometry(0.1, 2.6, 9.2), carTrim);
-    rib.position.set(sx * 1.56, 1.9, 0);
-    car.add(rib);
-    for (let rz = -3.6; rz <= 3.6; rz += 1.2) {
-      const vr = new THREE.Mesh(new THREE.BoxGeometry(0.06, 2.6, 0.12), carTrim);
-      vr.position.set(sx * 1.55, 1.9, rz);
-      car.add(vr);
+  // ---- the freight yard: three east-west tracks running ALONGSIDE the warehouse south wall ----
+  const steelRail = new THREE.MeshStandardMaterial({ color: 0x575d63, roughness: 0.4, metalness: 0.8 });
+  const tieMat = new THREE.MeshStandardMaterial({ color: 0x2b241c, roughness: 0.95 });
+  const trackZs = [26, 29.5, 33]; // parallel to the warehouse's long axis
+  const railLen = 92; // x -46..46
+  for (const tz of trackZs) {
+    // ballast bed
+    const bed = new THREE.Mesh(new THREE.BoxGeometry(railLen, 0.05, 3.1), new THREE.MeshStandardMaterial({ color: 0x33383d, roughness: 1 }));
+    bed.position.set(0, 0.005, tz);
+    bed.receiveShadow = true;
+    scene.add(bed);
+    // ties
+    for (let x = -45; x <= 45; x += 1.5) {
+      const tie = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.1, 2.4), tieMat);
+      tie.position.set(x, 0.05, tz);
+      tie.receiveShadow = true;
+      scene.add(tie);
+    }
+    // two rails
+    for (const off of [-0.75, 0.75]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(railLen, 0.13, 0.14), steelRail);
+      rail.position.set(0, 0.12, tz + off);
+      rail.castShadow = true;
+      scene.add(rail);
     }
   }
-  // slid-open door + dark interior mouth on the yard-facing side
-  const door = new THREE.Mesh(new THREE.BoxGeometry(0.08, 2.4, 2.1), carTrim);
-  door.position.set(1.62, 1.9, 1.9);
-  car.add(door);
-  const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.06, 2.3, 1.9), new THREE.MeshStandardMaterial({ color: 0x0a0c0e, roughness: 1 }));
-  mouth.position.set(1.56, 1.9, -0.35);
-  car.add(mouth);
-  // roof: snow slab + torn vent
-  const carRoof = new THREE.Mesh(new THREE.BoxGeometry(3.15, 0.16, 9.5), new THREE.MeshStandardMaterial({ color: 0xe8f2f6, roughness: 0.95 }));
-  carRoof.position.y = 3.36;
-  car.add(carRoof);
-  const vent = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.3, 0.9), carTrim);
-  vent.position.set(-0.6, 3.55, -2.4);
-  vent.rotation.z = 0.12;
-  car.add(vent);
-  // bogies + wheels poking out of the snow
-  for (const wz of [-3.1, 3.1]) {
-    const bogie = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.5, 1.6), carTrim);
-    bogie.position.set(0, 0.35, wz);
-    car.add(bogie);
-    for (const wx of [-0.75, 0.75]) {
-      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.12, 12), steelRail);
-      wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(wx, 0.3, wz + 0.4);
-      car.add(wheel);
+
+  // loading platform hugging the warehouse wall (gap left at the south loading bay, x -13..5)
+  const platMat = new THREE.MeshStandardMaterial({ color: 0x5a6167, roughness: 0.85, metalness: 0.1 });
+  const platEdge = new THREE.MeshStandardMaterial({ color: 0xb98a3c, roughness: 0.6, metalness: 0.2 });
+  for (const [px, pw] of [[-22.5, 19], [18.5, 27]] as [number, number][]) {
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(pw, 0.5, 2.0), platMat);
+    deck.position.set(px, 0.25, 23.4);
+    deck.castShadow = true;
+    deck.receiveShadow = true;
+    scene.add(deck);
+    const edge = new THREE.Mesh(new THREE.BoxGeometry(pw, 0.5, 0.12), platEdge);
+    edge.position.set(px, 0.25, 24.34);
+    scene.add(edge);
+    addSolid(deck, 'cover');
+  }
+
+  // --- freight cars: cover you can fight between ---
+  const carTrim = new THREE.MeshStandardMaterial({ color: 0x33383d, roughness: 0.7, metalness: 0.4 });
+  const wheelMat = new THREE.MeshStandardMaterial({ color: 0x23272b, roughness: 0.5, metalness: 0.7 });
+  const bogies = (parent: THREE.Group, halfSpan: number) => {
+    for (const wz of [-halfSpan, halfSpan]) {
+      const bogie = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.5, 1.5), carTrim);
+      bogie.position.set(0, 0.32, wz);
+      parent.add(bogie);
+      for (const wx of [-0.75, 0.75]) {
+        const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.12, 12), wheelMat);
+        wheel.rotation.z = Math.PI / 2;
+        wheel.position.set(wx, 0.3, wz + 0.55);
+        parent.add(wheel);
+      }
     }
-  }
-  car.position.set(RAIL_X, 0, -48);
-  car.rotation.y = 0.10;
-  car.rotation.z = -0.09; // leaning off the rails
-  scene.add(car);
-  addSolid(carBody, 'cover');
+  };
+  const boxcar = (cx: number, cz: number, body: number) => {
+    const g = new THREE.Group();
+    const mat = new THREE.MeshStandardMaterial({ color: body, roughness: 0.85, metalness: 0.15 });
+    const b = new THREE.Mesh(new THREE.BoxGeometry(9, 2.8, 2.9), mat);
+    b.position.y = 1.9;
+    b.castShadow = true;
+    b.receiveShadow = true;
+    b.userData.kind = 'cover';
+    g.add(b);
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(9.2, 0.16, 3.0), new THREE.MeshStandardMaterial({ color: 0xe8f2f6, roughness: 0.95 }));
+    roof.position.y = 3.38;
+    g.add(roof);
+    for (const sx of [-1, 1]) {
+      for (let rx = -3.6; rx <= 3.6; rx += 1.2) {
+        const vr = new THREE.Mesh(new THREE.BoxGeometry(0.1, 2.6, 0.08), carTrim);
+        vr.position.set(rx, 1.9, sx * 1.48);
+        g.add(vr);
+      }
+    }
+    const door = new THREE.Mesh(new THREE.BoxGeometry(2.1, 2.4, 0.08), carTrim);
+    door.position.set(1.5, 1.9, 1.5);
+    g.add(door);
+    bogies(g, 3.1);
+    g.position.set(cx, 0, cz);
+    scene.add(g);
+    colliderBoxes.push(new THREE.Box3(new THREE.Vector3(cx - 4.5, 0, cz - 1.45), new THREE.Vector3(cx + 4.5, 3.5, cz + 1.45)));
+    solidMeshes.push(b);
+  };
+  const containerMat = (c: number) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.7, metalness: 0.3 });
+  const container = (cx: number, cy: number, cz: number, c: number, solid = true) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(5.6, 2.3, 2.3), containerMat(c));
+    m.position.set(cx, cy, cz);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    scene.add(m);
+    if (solid) colliderBoxes.push(new THREE.Box3(new THREE.Vector3(cx - 2.8, cy - 1.15, cz - 1.15), new THREE.Vector3(cx + 2.8, cy + 1.15, cz + 1.15)));
+    solidMeshes.push(m);
+  };
+  const flatcar = (cx: number, cz: number, stack: number[]) => {
+    const g = new THREE.Group();
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(9, 0.4, 2.9), carTrim);
+    deck.position.y = 1.0;
+    deck.castShadow = true;
+    g.add(deck);
+    bogies(g, 3.1);
+    g.position.set(cx, 0, cz);
+    scene.add(g);
+    let topY = 1.2;
+    for (const c of stack) {
+      container(cx + (Math.random() - 0.5) * 0.6, topY + 1.15, cz, c);
+      topY += 2.3;
+    }
+    colliderBoxes.push(new THREE.Box3(new THREE.Vector3(cx - 4.5, 0, cz - 1.45), new THREE.Vector3(cx + 4.5, 1.2, cz + 1.45)));
+    solidMeshes.push(deck);
+  };
+  const tanker = (cx: number, cz: number) => {
+    const g = new THREE.Group();
+    const mat = new THREE.MeshStandardMaterial({ color: 0x8f9aa3, roughness: 0.45, metalness: 0.6 });
+    const shell = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, 7.4, 18), mat);
+    shell.rotation.z = Math.PI / 2;
+    shell.position.y = 2.0;
+    shell.castShadow = true;
+    g.add(shell);
+    for (const ex of [-3.7, 3.7]) {
+      const cap = new THREE.Mesh(new THREE.SphereGeometry(1.3, 18, 10), mat);
+      cap.scale.set(0.22, 1, 1);
+      cap.position.set(ex, 2.0, 0);
+      g.add(cap);
+    }
+    const dome = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 0.5, 12), carTrim);
+    dome.position.set(1.8, 3.4, 0);
+    g.add(dome);
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(7.6, 0.4, 2.4), carTrim);
+    frame.position.y = 0.85;
+    g.add(frame);
+    bogies(g, 2.6);
+    g.position.set(cx, 0, cz);
+    scene.add(g);
+    colliderBoxes.push(new THREE.Box3(new THREE.Vector3(cx - 3.9, 0, cz - 1.45), new THREE.Vector3(cx + 3.9, 3.4, cz + 1.45)));
+    solidMeshes.push(shell);
+  };
+  // parked consists — staggered so there are always fightable gaps between them
+  boxcar(-20, 26, 0x6e4a33);
+  boxcar(7, 26, 0x4d5a43);
+  flatcar(-8, 29.5, [0x8a5a2b, 0x703828]);
+  tanker(17, 29.5);
+  boxcar(-29, 33, 0x5a4a5e);
+  flatcar(14, 33, [0x3d5a6e]);
 
-  // spilled pallets + crates scattered off the car
-  const spillSpots: [number, number, number][] = [
-    [-14.5, -44, 0.4], [-13, -46.5, -0.7], [-15.5, -49, 1.1], [-12, -51, 0.2], [-26, -45, -0.3],
-  ];
-  for (const [sx, sz, ry] of spillSpots) {
-    const crate = new THREE.Mesh(new THREE.BoxGeometry(1.25, 1.25, 1.25), crateMat);
-    crate.position.set(sx, 0.62, sz);
-    crate.rotation.y = ry;
-    crate.castShadow = true;
-    scene.add(crate);
-    addSolid(crate, 'cover');
+  // gantry crane straddling the tracks, west side — the yard's landmark
+  const craneMat = new THREE.MeshStandardMaterial({ color: 0xb98a3c, roughness: 0.6, metalness: 0.35 });
+  const craneDark = new THREE.MeshStandardMaterial({ color: 0x2e3338, roughness: 0.7, metalness: 0.4 });
+  const crane = new THREE.Group();
+  for (const lz of [25, 34]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.6, 6.4, 0.6), craneMat);
+    leg.position.set(0, 3.2, lz - 29.5);
+    leg.castShadow = true;
+    crane.add(leg);
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.62, 1.0, 0.62), craneDark);
+    stripe.position.set(0, 1.0, lz - 29.5);
+    crane.add(stripe);
+    colliderBoxes.push(new THREE.Box3(new THREE.Vector3(-36.3, 0, lz - 0.3), new THREE.Vector3(-35.7, 6.4, lz + 0.3)));
+  }
+  const beam = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.0, 10.6), craneMat);
+  beam.position.set(0, 6.6, 0);
+  beam.castShadow = true;
+  crane.add(beam);
+  const trolley = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.5, 1.4), craneDark);
+  trolley.position.set(0, 6.0, 1.5);
+  crane.add(trolley);
+  const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 3.4, 6), craneDark);
+  cable.position.set(0, 4.1, 1.5);
+  crane.add(cable);
+  crane.position.set(-36, 0, 29.5);
+  scene.add(crane);
+  container(-36, 2.3, 31, 0x9a5c3c); // a load left hanging mid-yard
+
+  // station shed at the east end, just north of track A
+  const shedMat = new THREE.MeshStandardMaterial({ color: 0x4a525a, roughness: 0.8, metalness: 0.2 });
+  const shed = new THREE.Mesh(new THREE.BoxGeometry(7, 3.2, 6), shedMat);
+  shed.position.set(41.5, 1.6, 26.5);
+  shed.castShadow = true;
+  shed.receiveShadow = true;
+  scene.add(shed);
+  const shedRoof = new THREE.Mesh(new THREE.BoxGeometry(7.8, 0.2, 6.8), new THREE.MeshStandardMaterial({ color: 0xe8f2f6, roughness: 0.95 }));
+  shedRoof.position.set(41.5, 3.3, 26.5);
+  scene.add(shedRoof);
+  const shedDoor = new THREE.Mesh(new THREE.BoxGeometry(0.1, 2.4, 1.8), carTrim);
+  shedDoor.position.set(37.95, 1.2, 26.5);
+  scene.add(shedDoor);
+  const shedWin = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.9, 1.4), new THREE.MeshStandardMaterial({ color: 0x2a1e0e, emissive: 0xffa94d, emissiveIntensity: 1.6 }));
+  shedWin.position.set(37.96, 2.2, 29.0);
+  scene.add(shedWin);
+  colliderBoxes.push(new THREE.Box3(new THREE.Vector3(38, 0, 23.5), new THREE.Vector3(45, 3.2, 29.5)));
+  solidMeshes.push(shed);
+
+  // cargo stacks: containers west + crates/barrels along the fence lane
+  container(-43, 1.2, 26, 0x3d5a6e);
+  container(-43, 1.2, 29, 0x703828);
+  for (const [bx, bz] of [[-18, 35.4], [4, 35.6], [24, 35.4]] as [number, number][]) {
+    const stack = new THREE.Mesh(new THREE.BoxGeometry(1.9, 1.7, 1.5), crateMat);
+    stack.position.set(bx, 0.85, bz);
+    stack.rotation.y = (Math.random() - 0.5) * 0.3;
+    stack.castShadow = true;
+    scene.add(stack);
+    addSolid(stack, 'cover');
   }
 
-  // fuel tank on a cradle, east of the rails — fat round cover
-  const tankMat = new THREE.MeshStandardMaterial({ color: 0x54626b, roughness: 0.55, metalness: 0.5 });
-  const tank = new THREE.Mesh(new THREE.CylinderGeometry(1.15, 1.15, 4.6, 18), tankMat);
-  tank.rotation.z = Math.PI / 2;
-  tank.position.set(-8.5, 1.25, -51);
-  tank.castShadow = true;
-  scene.add(tank);
-  for (const cx of [-1.6, 1.6]) {
-    const cradle = new THREE.Mesh(new THREE.BoxGeometry(0.24, 1.2, 2.6), carTrim);
-    cradle.position.set(-8.5 + cx, 0.6, -51);
-    scene.add(cradle);
+  // platform lamps — three amber pools along the loading dock
+  for (const lx of [-22, 0, 22]) {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.1, 5, 8), postMat);
+    pole.position.set(lx, 2.5, 23.0);
+    pole.castShadow = true;
+    scene.add(pole);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.22, 0.3), craneDark);
+    head.position.set(lx, 5.0, 23.2);
+    scene.add(head);
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), new THREE.MeshStandardMaterial({ color: 0xffe2b0, emissive: 0xffb066, emissiveIntensity: 2.4 }));
+    bulb.position.set(lx, 4.85, 23.2);
+    scene.add(bulb);
+    const pl = new THREE.PointLight(0xffb066, 26, 15, 2);
+    pl.position.set(lx, 4.8, 23.4);
+    scene.add(pl);
+    lamps.push({ light: pl, base: 26, seed: Math.random() * 90 });
   }
-  const tankCap = new THREE.Mesh(new THREE.SphereGeometry(1.15, 18, 10), tankMat);
-  tankCap.scale.set(1, 1, 0.28);
-  tankCap.position.set(-6.2, 1.25, -51);
-  tankCap.rotation.y = Math.PI / 2;
-  scene.add(tankCap);
-  addSolid(tank, 'cover');
 
-  // signal mast with a dead red lamp — marks the spur entrance
+  // floodlight washing the yard from the shed roof
+  const yardSpot = new THREE.SpotLight(0xcfe3f0, 420, 46, 0.66, 0.6, 1.6);
+  yardSpot.position.set(41, 5.5, 27);
+  yardSpot.target.position.set(10, 0, 31);
+  scene.add(yardSpot.target);
+  scene.add(yardSpot);
+  lamps.push({ light: yardSpot, base: 420, seed: Math.random() * 90 });
+
+  // signal mast with a dead red lamp at the west throat
   const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 4.4, 8), postMat);
-  mast.position.set(-27.5, 2.2, -40);
+  mast.position.set(-44.5, 2.2, 29.5);
   mast.castShadow = true;
   scene.add(mast);
-  const sigHead = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.8, 0.26), new THREE.MeshStandardMaterial({ color: 0x1c2226, roughness: 0.5, metalness: 0.6 }));
-  sigHead.position.set(-27.5, 4.3, -40);
+  const sigHead = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.8, 0.26), new THREE.MeshStandardMaterial({ color: 0x1c2226, roughness: 0.5, metalness: 0.6 }));
+  sigHead.position.set(-44.5, 4.3, 29.5);
   scene.add(sigHead);
   const sigLamp = new THREE.Mesh(
     new THREE.SphereGeometry(0.09, 10, 8),
     new THREE.MeshStandardMaterial({ color: 0x220606, emissive: 0xff2222, emissiveIntensity: 1.4 }),
   );
-  sigLamp.position.set(-27.5, 4.45, -39.86);
+  sigLamp.position.set(-44.5, 4.45, 29.36);
   scene.add(sigLamp);
-
-  // yard floodlight pole watching over the spur
-  const spurPole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 7.5, 8), postMat);
-  spurPole.position.set(-11, 3.75, -40);
-  spurPole.castShadow = true;
-  scene.add(spurPole);
-  const spurArm = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.1, 0.1), postMat);
-  spurArm.position.set(-10.3, 7.4, -40);
-  scene.add(spurArm);
-  const spurLight = new THREE.SpotLight(0xcfe3f0, 520, 44, 0.62, 0.6, 1.6);
-  spurLight.position.set(-9.7, 7.4, -40);
-  spurLight.target.position.set(-18, 0, -49);
-  scene.add(spurLight.target);
-  scene.add(spurLight);
-  lamps.push({ light: spurLight, base: 520, seed: Math.random() * 90 });
-  const spurBulb = new THREE.Mesh(
-    new THREE.SphereGeometry(0.12, 8, 6),
-    new THREE.MeshStandardMaterial({ color: 0xdfeaf2, emissive: 0xcfe3f0, emissiveIntensity: 2 }),
-  );
-  spurBulb.position.set(-9.7, 7.35, -40);
-  scene.add(spurBulb);
-
-  // heavier drifts burying the far end of the line
-  for (let i = 0; i < 7; i++) {
-    const drift = new THREE.Mesh(new THREE.SphereGeometry(1.6 + Math.random() * 2, 10, 7), snowMat);
-    drift.scale.set(1.8, 0.32, 1);
-    drift.position.set(-YARD_W + 4 + Math.random() * (YARD_W * 2 - 8), 0.03, -WORLD_N + 1.5 + Math.random() * 2.5);
-    drift.rotation.y = Math.random() * 3;
-    scene.add(drift);
-  }
 
   // warehouse shell with three passable openings: north breach, south loading bay, west vehicle gate
   wallBox(26, 7, 0.6, -19, 3.5, -HALF_D);

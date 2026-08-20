@@ -80,8 +80,7 @@ export const HALF_W = 32; // warehouse interior half-extents
 export const HALF_D = 22;
 export const YARD_W = 47; // fenced snow yard half-extents (playable beyond the walls)
 export const YARD_D = 37; // south fence line
-export const WORLD_N = YARD_D + 22; // north edge — the derailed rail spur extends the battlefield
-export const RAIL_X = -20.5; // rail spur centerline (runs north-south through the new area)
+export const WORLD_N = YARD_D; // world is symmetric again — the freight yard lives in the south strip
 export const GRAV = 13;
 
 /* ============================== recoil ============================== */

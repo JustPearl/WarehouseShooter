@@ -505,8 +505,9 @@ export class Engine {
       [-43, -33], [-20, -33], [0, -33], [20, -33], [43, -33],
       [-43, 0], [43, 0],
       [-43, 33], [-20, 33], [0, 33], [20, 33], [43, 33],
-      // the rail spur — hostiles rise out of the snow along the dead line
-      [-38, -52], [-20, -55], [-2, -51], [18, -53], [38, -49], [-30, -42], [30, -42],
+      // the freight yard — hostiles rise between the parked cars and along the fence lane
+      [-43, 35.5], [-27, 35.5], [-12, 35.5], [3, 35.5], [19, 35.5], [34, 35.5],
+      [-45, 31], [45, 31],
     ];
     let best = anchors[Math.floor(Math.random() * anchors.length)];
     for (let tries = 0; tries < 6; tries++) {

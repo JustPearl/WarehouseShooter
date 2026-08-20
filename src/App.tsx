@@ -750,9 +750,9 @@ export default function App() {
                     <p className="mt-3 text-[15px] font-medium leading-relaxed text-[#9cc3d2]">
                       Prudhoe Supply Depot, Alaska. The convoy never made it. A mercenary company has taken the warehouse
                       district and they are coming through the storm in <span className="font-bold text-[#bfeaf5]">endless waves</span>.
-                      The fight spills into the <span className="font-bold text-[#bfeaf5]">fenced snow yard</span> and out to the
-                      <span className="font-bold text-[#bfeaf5]"> derailed rail spur</span> past the north gate — a wrecked boxcar,
-                      fuel tank and signal mast make hard cover out in the whiteout.
+                      The fight spills into the <span className="font-bold text-[#bfeaf5]">fenced snow yard</span> and along the
+                      <span className="font-bold text-[#bfeaf5]"> freight yard</span> that runs beside the south wall — three rail
+                      lines, parked boxcars, a tanker and a gantry crane make hard cover between the tracks.
                     </p>
                     <p className="mt-3 text-[15px] font-medium leading-relaxed text-[#9cc3d2]">
                       You deploy with <span className="font-bold text-[#ffab3d]">only the KODIAK sidearm</span>. Everything else —
