@@ -81,19 +81,18 @@ export function buildAttNodes(model: WeaponModel, wi: number): Record<string, TH
     rdotG.add(rdot);
     put('rdot', rdotG);
   } else {
-    // SABLE .38 (bore y=+0.012, snub muzzle z=-0.172, cylinder z=-0.022, grip at z=+0.05)
+    // SABLE .38 (bore y=+0.012, snub crown z=-0.134, muzzle anchor z=-0.140,
+    // cylinder z=-0.022, underlug z -0.055..-0.123, grip raked from z=+0.058)
     const suppG = new THREE.Group();
-    suppG.add(attCyl(0.0165, 0.075, attDark, 0, 0.012, -0.20));
-    suppG.add(attCyl(0.0175, 0.010, attSteel, 0, 0.012, -0.168));
+    suppG.add(attCyl(0.0155, 0.075, attDark, 0, 0.012, -0.177));
+    suppG.add(attCyl(0.0165, 0.010, attSteel, 0, 0.012, -0.145));
     put('supp', suppG);
     // 7-shot cylinder conversion: a taller cylinder with an amber charge band
     const xmagG = new THREE.Group();
-    xmagG.add(attCyl(0.0365, 0.064, attSteel, 0, 0.010, -0.022));
-    const band = attBox(0.075, 0.010, 0.064, attAmber, 0, 0.010, -0.022);
-    band.scale.x = 1; // wraps visually as a slab through the cylinder
-    xmagG.add(band);
+    xmagG.add(attCyl(0.0335, 0.060, attSteel, 0, 0.012, -0.022));
+    xmagG.add(attBox(0.060, 0.010, 0.060, attAmber, 0, 0.012, -0.022));
     put('xmag', xmagG);
-    put('laser', attBox(0.018, 0.022, 0.048, attDark, 0, -0.036, -0.104), attBox(0.007, 0.007, 0.007, attAmber, 0, -0.036, -0.13), laserBeam(-0.036));
+    put('laser', attBox(0.017, 0.020, 0.046, attDark, 0, -0.032, -0.088), attBox(0.007, 0.007, 0.007, attAmber, 0, -0.032, -0.114), laserBeam(-0.032));
     // target grips: smoother dark walnut with a palm swell
     put('grips', attBox(0.044, 0.102, 0.052, attPoly, 0, -0.098, 0.067, -0.34), attBox(0.046, 0.013, 0.054, attSteel, 0, -0.052, 0.052, -0.34));
   }

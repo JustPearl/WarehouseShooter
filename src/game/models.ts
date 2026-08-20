@@ -267,10 +267,11 @@ export function buildSMG(): WeaponModel {
 }
 
 /* ============================================================
-   SABLE .38 — snub-nose double-action revolver, built at 1.6×
-   true scale (~27cm total; real snub ≈ 17cm). Faces -Z.
+   SABLE .38 — compact snub-nose double-action revolver, ~22.5cm
+   on screen with a true short 2-inch barrel. Faces -Z.
    Bore axis at y=+0.012; fixed sight line at y=+0.052
-   (engine ads.y = -0.052).
+   (engine ads.y = -0.052); muzzle anchor z=-0.140; the grip
+   rakes toward the shooter (butt to +Z).
    ============================================================ */
 export function buildRevolver(): WeaponModel {
   const g = new THREE.Group();
@@ -287,104 +288,107 @@ export function buildRevolver(): WeaponModel {
     return m;
   };
 
-  // ---- frame: solid J-frame slab the cylinder seats into ----
-  g.add(box(0.053, 0.052, 0.132, steel, 0, 0.014, 0.006)); // z -0.060..+0.072
-  g.add(box(0.040, 0.036, 0.030, steel, 0, 0.006, 0.064)); // grip frame behind the hammer
+  // ---- slim J-frame: the cylinder is the widest part, frame wraps it closely ----
+  g.add(box(0.050, 0.058, 0.128, steel, 0, 0.010, 0.008)); // z -0.056..+0.072
+  g.add(box(0.034, 0.036, 0.026, steel, 0, 0.004, 0.067)); // grip frame behind the hammer
   // top strap with a matte rib + sight serrations
-  g.add(box(0.030, 0.009, 0.126, steelDark, 0, 0.0435, 0.004));
-  for (let i = 0; i < 5; i++) g.add(box(0.030, 0.003, 0.004, steel, 0, 0.0485, 0.036 + i * 0.009));
+  g.add(box(0.026, 0.009, 0.122, steelDark, 0, 0.0435, 0.004));
+  for (let i = 0; i < 5; i++) g.add(box(0.026, 0.003, 0.004, steel, 0, 0.0485, 0.036 + i * 0.009));
   // side plate outlines + screws
-  g.add(box(0.002, 0.038, 0.102, steelDark, 0.0275, 0.012, 0.018));
-  g.add(box(0.002, 0.038, 0.102, steelDark, -0.0275, 0.012, 0.018));
-  for (const sx of [0.0285, -0.0285]) {
+  g.add(box(0.002, 0.036, 0.100, steelDark, 0.0252, 0.012, 0.014));
+  g.add(box(0.002, 0.036, 0.100, steelDark, -0.0252, 0.012, 0.014));
+  for (const sx of [0.0265, -0.0265]) {
     for (const [sy, sz] of [[0.026, 0.048], [-0.002, 0.032], [0.020, -0.040]] as const) {
-      const sc = new THREE.Mesh(new THREE.CylinderGeometry(0.0035, 0.0035, 0.005, 8), brass);
+      const sc = new THREE.Mesh(new THREE.CylinderGeometry(0.0032, 0.0032, 0.005, 8), brass);
       sc.rotation.z = Math.PI / 2;
       sc.position.set(sx, sy, sz);
       g.add(sc);
     }
   }
 
-  // ---- snub barrel: round, slightly tapered, 2-inch stub ----
-  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.0145, 0.0165, 0.110, 14), steel);
+  // ---- true snub barrel: slim, tapered, short 2-inch stub ----
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.0105, 0.0125, 0.076, 14), steel);
   barrel.rotation.x = Math.PI / 2;
-  barrel.position.set(0, 0.012, -0.117); // z -0.172..-0.062
+  barrel.position.set(0, 0.012, -0.093); // z -0.131..-0.055
   barrel.castShadow = true;
   g.add(barrel);
-  g.add(cyl(0.0155, 0.007, steelDark, 0, 0.012, -0.168)); // muzzle crown
-  g.add(cyl(0.0175, 0.014, steelDark, 0, 0.012, -0.058)); // forcing cone into the frame
-  // ---- round underlug housing the ejector rod ----
-  g.add(cyl(0.0115, 0.086, steel, 0, -0.010, -0.105)); // z -0.148..-0.062
-  g.add(cyl(0.005, 0.014, steelDark, 0, -0.010, -0.152)); // rod tip
-  g.add(cyl(0.0065, 0.006, steelDark, 0, -0.010, -0.144)); // rod knurl
+  g.add(cyl(0.0115, 0.006, steelDark, 0, 0.012, -0.134)); // recessed muzzle crown
+  g.add(cyl(0.0135, 0.012, steelDark, 0, 0.012, -0.052, 12)); // forcing cone into the frame
+  // ---- slim underlug housing the ejector rod ----
+  g.add(cyl(0.008, 0.068, steel, 0, -0.010, -0.089)); // z -0.123..-0.055
+  g.add(cyl(0.0032, 0.074, steelDark, 0, -0.010, -0.088, 10)); // rod
+  g.add(cyl(0.0045, 0.007, steelDark, 0, -0.010, -0.122, 10)); // rod knurl
+  g.add(cyl(0.0038, 0.012, steel, 0, -0.010, -0.127, 10)); // rod tip
 
   // ---- cylinder: five-shot, axis along the bore, flutes front-to-back ----
-  g.add(cyl(0.0285, 0.062, steel, 0, 0.010, -0.022, 20)); // z -0.053..+0.009
+  g.add(cyl(0.0268, 0.056, steel, 0, 0.012, -0.022, 20)); // z -0.050..+0.006
   for (let i = 0; i < 6; i++) { // fluting
     const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
-    const fl = box(0.011, 0.005, 0.050, steelDark, Math.cos(a) * 0.0265, 0.010 + Math.sin(a) * 0.0265, -0.022);
+    const fl = box(0.010, 0.005, 0.046, steelDark, Math.cos(a) * 0.0252, 0.012 + Math.sin(a) * 0.0252, -0.022);
     fl.rotation.z = a + Math.PI / 2;
     g.add(fl);
   }
   // chamber mouths on the front face + extractor star
   for (let i = 0; i < 5; i++) {
     const a = (i / 5) * Math.PI * 2 - Math.PI / 2;
-    g.add(cyl(0.0065, 0.006, steelDark, Math.cos(a) * 0.0165, 0.010 + Math.sin(a) * 0.0165, -0.0545, 10));
+    g.add(cyl(0.006, 0.006, steelDark, Math.cos(a) * 0.015, 0.012 + Math.sin(a) * 0.015, -0.0525, 10));
   }
-  g.add(cyl(0.007, 0.006, steelDark, 0, 0.010, -0.0545, 10));
-  g.add(box(0.002, 0.046, 0.009, steelDark, -0.0275, 0.010, -0.034)); // crane gap line
-  g.add(box(0.007, 0.013, 0.028, steelDark, -0.029, 0.030, 0.010)); // cylinder release latch
-  g.add(box(0.008, 0.004, 0.020, steel, -0.030, 0.030, 0.010));
+  g.add(cyl(0.0065, 0.006, steelDark, 0, 0.012, -0.0525, 10));
+  g.add(box(0.002, 0.046, 0.009, steelDark, -0.026, 0.012, -0.034)); // crane gap line
+  g.add(box(0.007, 0.013, 0.026, steelDark, -0.027, 0.032, 0.008)); // cylinder release latch
+  g.add(box(0.008, 0.004, 0.018, steel, -0.028, 0.032, 0.008));
 
   // ---- hammer with a checkered spur ----
-  g.add(box(0.013, 0.030, 0.014, steelDark, 0, 0.030, 0.074));
-  const spur = box(0.014, 0.009, 0.028, steelDark, 0, 0.050, 0.080);
+  g.add(box(0.012, 0.030, 0.014, steelDark, 0, 0.030, 0.074));
+  const spur = box(0.013, 0.008, 0.026, steelDark, 0, 0.050, 0.080);
   spur.rotation.x = -0.5;
   g.add(spur);
   for (let i = 0; i < 3; i++) {
-    const se = box(0.016, 0.003, 0.018, steel, 0, 0.052, 0.074 + i * 0.007);
+    const se = box(0.015, 0.003, 0.016, steel, 0, 0.052, 0.074 + i * 0.007);
     se.rotation.x = -0.5;
     g.add(se);
   }
 
   // ---- front sight: pinned ramp + blade with an amber fiber dot ----
-  const ramp = box(0.013, 0.012, 0.018, steel, 0, 0.034, -0.147);
+  const ramp = box(0.012, 0.012, 0.016, steel, 0, 0.034, -0.118);
   ramp.rotation.x = 0.35;
   g.add(ramp);
-  g.add(box(0.006, 0.016, 0.009, steelDark, 0, 0.046, -0.143));
-  g.add(box(0.0038, 0.0038, 0.004, amberDot, 0, 0.051, -0.1485));
+  g.add(box(0.006, 0.016, 0.008, steelDark, 0, 0.046, -0.114));
+  g.add(box(0.0038, 0.0038, 0.004, amberDot, 0, 0.051, -0.119));
 
   // ---- trigger guard + smooth double-action trigger ----
   const guardGrp = new THREE.Group();
   guardGrp.position.set(0, -0.016, 0.000);
   guardGrp.rotation.y = Math.PI / 2; // ring plane spans Y-Z (finger loops fore-aft)
-  const guard = new THREE.Mesh(new THREE.TorusGeometry(0.024, 0.0055, 8, 20, Math.PI), steel);
+  const guard = new THREE.Mesh(new THREE.TorusGeometry(0.020, 0.0045, 8, 20, Math.PI), steel);
   guard.rotation.z = Math.PI; // hang the loop below the frame
   guard.castShadow = true;
   guardGrp.add(guard);
   g.add(guardGrp);
-  g.add(box(0.014, 0.028, 0.009, steel, 0, -0.020, -0.020)); // front strap
-  const trig = box(0.005, 0.030, 0.013, steel, 0, -0.020, -0.002);
+  g.add(box(0.013, 0.026, 0.008, steel, 0, -0.018, -0.018)); // front strap
+  const trig = box(0.005, 0.028, 0.012, steel, 0, -0.018, -0.002);
   trig.rotation.x = 0.35;
   g.add(trig);
 
-  // ---- grip: raked walnut with brass medallions ----
+  // ---- grip: steel grip frame welded to the receiver, walnut panels on it,
+  //      raked toward the shooter (negative X rotation = butt to +Z) ----
   const grip = new THREE.Group();
-  grip.position.set(0, -0.048, 0.050);
-  grip.rotation.x = 0.34;
-  grip.add(box(0.040, 0.100, 0.046, wood, 0, -0.052, 0));
-  grip.add(box(0.044, 0.014, 0.050, steelDark, 0, -0.002, 0)); // grip frame cap
-  grip.add(box(0.042, 0.014, 0.050, woodDark, 0, -0.102, 0)); // round butt base
-  for (let i = 0; i < 4; i++) {
-    grip.add(box(0.046, 0.004, 0.004, woodDark, 0, -0.030 - i * 0.018, 0.021));
-    grip.add(box(0.046, 0.004, 0.004, woodDark, 0, -0.030 - i * 0.018, -0.021));
+  grip.position.set(0, -0.020, 0.058);
+  grip.rotation.x = -0.30;
+  grip.add(box(0.026, 0.092, 0.030, steelDark, 0, -0.040, 0)); // steel grip frame
+  grip.add(box(0.030, 0.084, 0.007, wood, 0, -0.042, 0.0155)); // left walnut panel
+  grip.add(box(0.030, 0.084, 0.007, wood, 0, -0.042, -0.0155)); // right walnut panel
+  for (let i = 0; i < 5; i++) { // checkering stripes on both panels
+    grip.add(box(0.031, 0.003, 0.002, woodDark, 0, -0.016 - i * 0.014, 0.0195));
+    grip.add(box(0.031, 0.003, 0.002, woodDark, 0, -0.016 - i * 0.014, -0.0195));
   }
-  const med = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, 0.003, 12), brass);
+  grip.add(box(0.028, 0.012, 0.032, woodDark, 0, -0.092, 0)); // round butt cap
+  const med = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.003, 12), brass);
   med.rotation.z = Math.PI / 2;
-  med.position.set(0.0215, -0.052, 0);
+  med.position.set(0.0175, -0.045, 0);
   grip.add(med);
   const med2 = med.clone();
-  med2.position.x = -0.0215;
+  med2.position.x = -0.0175;
   grip.add(med2);
   g.add(grip);
 
@@ -392,9 +396,9 @@ export function buildRevolver(): WeaponModel {
   g.add(box(0.007, 0.010, 0.010, steelDark, 0.009, 0.047, 0.062));
   g.add(box(0.007, 0.010, 0.010, steelDark, -0.009, 0.047, 0.062));
 
-  // ---- muzzle anchor + flash ----
+  // ---- muzzle anchor + flash (at the new short-barrel crown) ----
   const muzzle = new THREE.Object3D();
-  muzzle.position.set(0, 0.012, -0.172);
+  muzzle.position.set(0, 0.012, -0.140);
   muzzle.rotation.y = Math.PI; // gun is built facing -Z: make +Z point down the barrel
   g.add(muzzle);
   const flash = addFlash(muzzle, 0.22);
