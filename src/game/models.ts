@@ -288,63 +288,73 @@ export function buildRevolver(): WeaponModel {
     return m;
   };
 
-  // ---- slim J-frame: the cylinder is the widest part, frame wraps it closely ----
-  g.add(box(0.050, 0.058, 0.128, steel, 0, 0.010, 0.008)); // z -0.056..+0.072
-  g.add(box(0.034, 0.036, 0.026, steel, 0, 0.004, 0.067)); // grip frame behind the hammer
-  // top strap with a matte rib + sight serrations
-  g.add(box(0.026, 0.009, 0.122, steelDark, 0, 0.0435, 0.004));
-  for (let i = 0; i < 5; i++) g.add(box(0.026, 0.003, 0.004, steel, 0, 0.0485, 0.036 + i * 0.009));
-  // side plate outlines + screws
-  g.add(box(0.002, 0.036, 0.100, steelDark, 0.0252, 0.012, 0.014));
-  g.add(box(0.002, 0.036, 0.100, steelDark, -0.0252, 0.012, 0.014));
-  for (const sx of [0.0265, -0.0265]) {
-    for (const [sy, sz] of [[0.026, 0.048], [-0.002, 0.032], [0.020, -0.040]] as const) {
+  // ---- a real frame: six machined members enclosing the window the cylinder
+  //      nests inside — walls, top strap, floor, front + rear plates, hammer housing ----
+  const winY = 0.009; // vertical centre of the frame window
+  g.add(box(0.006, 0.054, 0.064, steel, 0.031, winY, -0.022)); // right frame wall
+  g.add(box(0.006, 0.054, 0.064, steel, -0.031, winY, -0.022)); // left frame wall
+  g.add(box(0.030, 0.009, 0.128, steel, 0, 0.0405, 0.006)); // top strap bridging over the window
+  for (let i = 0; i < 5; i++) g.add(box(0.030, 0.003, 0.004, steelDark, 0, 0.046, 0.038 + i * 0.009)); // matte rib serrations
+  g.add(box(0.050, 0.010, 0.116, steel, 0, -0.025, 0.001)); // frame floor under the window
+  g.add(box(0.062, 0.060, 0.010, steel, 0, 0.007, -0.059)); // front plate — the barrel seats through it
+  g.add(box(0.062, 0.060, 0.012, steel, 0, 0.007, 0.013)); // rear plate
+  g.add(box(0.046, 0.056, 0.030, steel, 0, 0.004, 0.035)); // hammer housing / rear block
+  // swing-out crane arm reaching into the front of the window + pivot screw
+  g.add(box(0.020, 0.007, 0.007, steelDark, -0.019, 0.020, -0.046));
+  const pivot = new THREE.Mesh(new THREE.CylinderGeometry(0.0042, 0.0042, 0.008, 10), brass);
+  pivot.rotation.z = Math.PI / 2;
+  pivot.position.set(-0.0315, 0.020, -0.046);
+  g.add(pivot);
+  g.add(box(0.002, 0.046, 0.009, steelDark, -0.0282, winY, -0.030)); // crane gap line on the left
+  // side-plate screws on the outer faces of the walls
+  for (const sx of [0.0345, -0.0345]) {
+    for (const [sy, sz] of [[0.024, -0.008], [-0.002, -0.024], [0.018, -0.042]] as const) {
       const sc = new THREE.Mesh(new THREE.CylinderGeometry(0.0032, 0.0032, 0.005, 8), brass);
       sc.rotation.z = Math.PI / 2;
       sc.position.set(sx, sy, sz);
       g.add(sc);
     }
   }
+  // cylinder release latch on the left wall
+  g.add(box(0.006, 0.013, 0.026, steelDark, -0.036, 0.028, 0.000));
+  g.add(box(0.008, 0.004, 0.018, steel, -0.037, 0.028, 0.000));
 
-  // ---- true snub barrel: slim, tapered, short 2-inch stub ----
-  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.0105, 0.0125, 0.076, 14), steel);
+  // ---- barrel: passes through the front plate and seats into the frame ----
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.0105, 0.0125, 0.082, 14), steel);
   barrel.rotation.x = Math.PI / 2;
-  barrel.position.set(0, 0.012, -0.093); // z -0.131..-0.055
+  barrel.position.set(0, 0.012, -0.099); // z -0.140..-0.058
   barrel.castShadow = true;
   g.add(barrel);
-  g.add(cyl(0.0115, 0.006, steelDark, 0, 0.012, -0.134)); // recessed muzzle crown
-  g.add(cyl(0.0135, 0.012, steelDark, 0, 0.012, -0.052, 12)); // forcing cone into the frame
-  // ---- slim underlug housing the ejector rod ----
-  g.add(cyl(0.008, 0.068, steel, 0, -0.010, -0.089)); // z -0.123..-0.055
-  g.add(cyl(0.0032, 0.074, steelDark, 0, -0.010, -0.088, 10)); // rod
-  g.add(cyl(0.0045, 0.007, steelDark, 0, -0.010, -0.122, 10)); // rod knurl
-  g.add(cyl(0.0038, 0.012, steel, 0, -0.010, -0.127, 10)); // rod tip
+  g.add(cyl(0.0115, 0.006, steelDark, 0, 0.012, -0.1375)); // recessed muzzle crown
+  g.add(cyl(0.0135, 0.012, steelDark, 0, 0.012, -0.056, 12)); // forcing cone inside the front plate
+  // ---- underlug + ejector rod, running back into the front plate ----
+  g.add(cyl(0.008, 0.070, steel, 0, -0.010, -0.091)); // z -0.126..-0.056
+  g.add(cyl(0.0032, 0.076, steelDark, 0, -0.010, -0.090, 10)); // rod
+  g.add(cyl(0.0045, 0.007, steelDark, 0, -0.010, -0.125, 10)); // rod knurl
+  g.add(cyl(0.0038, 0.012, steel, 0, -0.010, -0.130, 10)); // rod tip
 
-  // ---- cylinder: five-shot, axis along the bore, flutes front-to-back ----
-  g.add(cyl(0.0268, 0.056, steel, 0, 0.012, -0.022, 20)); // z -0.050..+0.006
-  for (let i = 0; i < 6; i++) { // fluting
+  // ---- cylinder: five-shot, nested in the window with a machined gap all around ----
+  g.add(cyl(0.0268, 0.056, steel, 0, winY - 0.001, -0.022, 20)); // z -0.050..+0.006
+  for (let i = 0; i < 6; i++) { // flutes running front-to-back
     const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
-    const fl = box(0.010, 0.005, 0.046, steelDark, Math.cos(a) * 0.0252, 0.012 + Math.sin(a) * 0.0252, -0.022);
+    const fl = box(0.010, 0.005, 0.046, steelDark, Math.cos(a) * 0.0252, winY - 0.001 + Math.sin(a) * 0.0252, -0.022);
     fl.rotation.z = a + Math.PI / 2;
     g.add(fl);
   }
-  // chamber mouths on the front face + extractor star
+  // chamber mouths + extractor star, recessed behind the front plate
   for (let i = 0; i < 5; i++) {
     const a = (i / 5) * Math.PI * 2 - Math.PI / 2;
-    g.add(cyl(0.006, 0.006, steelDark, Math.cos(a) * 0.015, 0.012 + Math.sin(a) * 0.015, -0.0525, 10));
+    g.add(cyl(0.006, 0.006, steelDark, Math.cos(a) * 0.015, winY - 0.001 + Math.sin(a) * 0.015, -0.0525, 10));
   }
-  g.add(cyl(0.0065, 0.006, steelDark, 0, 0.012, -0.0525, 10));
-  g.add(box(0.002, 0.046, 0.009, steelDark, -0.026, 0.012, -0.034)); // crane gap line
-  g.add(box(0.007, 0.013, 0.026, steelDark, -0.027, 0.032, 0.008)); // cylinder release latch
-  g.add(box(0.008, 0.004, 0.018, steel, -0.028, 0.032, 0.008));
+  g.add(cyl(0.0065, 0.006, steelDark, 0, winY - 0.001, -0.0525, 10));
 
-  // ---- hammer with a checkered spur ----
-  g.add(box(0.012, 0.030, 0.014, steelDark, 0, 0.030, 0.074));
-  const spur = box(0.013, 0.008, 0.026, steelDark, 0, 0.050, 0.080);
+  // ---- hammer with a checkered spur, riding the hammer housing ----
+  g.add(box(0.012, 0.030, 0.014, steelDark, 0, 0.038, 0.042));
+  const spur = box(0.013, 0.008, 0.026, steelDark, 0, 0.056, 0.050);
   spur.rotation.x = -0.5;
   g.add(spur);
   for (let i = 0; i < 3; i++) {
-    const se = box(0.015, 0.003, 0.016, steel, 0, 0.052, 0.074 + i * 0.007);
+    const se = box(0.015, 0.003, 0.016, steel, 0, 0.058, 0.044 + i * 0.007);
     se.rotation.x = -0.5;
     g.add(se);
   }
@@ -358,22 +368,22 @@ export function buildRevolver(): WeaponModel {
 
   // ---- trigger guard + smooth double-action trigger ----
   const guardGrp = new THREE.Group();
-  guardGrp.position.set(0, -0.016, 0.000);
+  guardGrp.position.set(0, -0.022, 0.000);
   guardGrp.rotation.y = Math.PI / 2; // ring plane spans Y-Z (finger loops fore-aft)
   const guard = new THREE.Mesh(new THREE.TorusGeometry(0.020, 0.0045, 8, 20, Math.PI), steel);
-  guard.rotation.z = Math.PI; // hang the loop below the frame
+  guard.rotation.z = Math.PI; // hang the loop below the frame floor
   guard.castShadow = true;
   guardGrp.add(guard);
   g.add(guardGrp);
-  g.add(box(0.013, 0.026, 0.008, steel, 0, -0.018, -0.018)); // front strap
-  const trig = box(0.005, 0.028, 0.012, steel, 0, -0.018, -0.002);
+  g.add(box(0.013, 0.026, 0.008, steel, 0, -0.024, -0.020)); // front strap off the floor
+  const trig = box(0.005, 0.028, 0.012, steel, 0, -0.024, -0.004);
   trig.rotation.x = 0.35;
   g.add(trig);
 
   // ---- grip: steel grip frame welded to the receiver, walnut panels on it,
   //      raked toward the shooter (negative X rotation = butt to +Z) ----
   const grip = new THREE.Group();
-  grip.position.set(0, -0.020, 0.058);
+  grip.position.set(0, -0.024, 0.044); // hangs off the hammer housing
   grip.rotation.x = -0.30;
   grip.add(box(0.026, 0.092, 0.030, steelDark, 0, -0.040, 0)); // steel grip frame
   grip.add(box(0.030, 0.084, 0.007, wood, 0, -0.042, 0.0155)); // left walnut panel
