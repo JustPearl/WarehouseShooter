@@ -359,14 +359,15 @@ export function buildRevolver(): WeaponModel {
   }
   g.add(cyl(0.0065, 0.006, steelDark, 0, winY - 0.001, -0.051, 10));
 
-  // ---- hammer with a checkered spur, riding the hammer housing ----
-  g.add(box(0.012, 0.030, 0.014, steelDark, 0, 0.038, 0.042));
-  const spur = box(0.013, 0.008, 0.026, steelDark, 0, 0.056, 0.050);
-  spur.rotation.x = -0.5;
+  // ---- low-profile DA hammer, tucked under the sight line (y=+0.052) so it
+  //      never crowds the notch — real snubs keep the spur well below the strap ----
+  g.add(box(0.012, 0.026, 0.014, steelDark, 0, 0.024, 0.042)); // body y 0.011..0.037
+  const spur = box(0.013, 0.007, 0.024, steelDark, 0, 0.040, 0.050);
+  spur.rotation.x = -0.6; // folded tighter toward the frame
   g.add(spur);
   for (let i = 0; i < 3; i++) {
-    const se = box(0.015, 0.003, 0.016, steel, 0, 0.058, 0.044 + i * 0.007);
-    se.rotation.x = -0.5;
+    const se = box(0.015, 0.003, 0.014, steel, 0, 0.043, 0.043 + i * 0.006);
+    se.rotation.x = -0.6;
     g.add(se);
   }
 
